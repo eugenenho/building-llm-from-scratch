@@ -14,8 +14,8 @@ All changes we make to the assignment code or PDF will be documented in this fil
 - handout: Modernize architecture for accounting
 - handout: Fix AdamW disparity to paper (order of weight-decay vs gradient update)
 - handout: Revert column/row major changes
-- code: Many tests fixed
-- code: Tensor typing revised
+- code: Many tests fixed, made more specific
+- code: Tensor typing revised is adapters and tests
 
 
 
