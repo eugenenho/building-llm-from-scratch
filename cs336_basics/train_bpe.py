@@ -112,7 +112,8 @@ def train_bpe_function(
             counts = Counter(matches)
             print(counts)
 
-            counts2 = [item.encode("utf-8", errors="ignore"):count for item, count in counts.items()]
+            
+            counts2 = {tuple(bytes([b]) for b in item.encode("utf-8")): count for item, count in counts.items()}
             print(counts2)
             # counts['.'] = 3
             max_freq = counts.most_common(1)[0][1]
