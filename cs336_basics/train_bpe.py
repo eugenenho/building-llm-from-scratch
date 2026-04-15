@@ -84,10 +84,12 @@ def train_bpe_function(
 ):
     
     # Initialize vocab
-    vocab = {i: bytes([i]) for i in range(256)}
+    vocab_effective_size = 256
+    vocab = {i: bytes([i]) for i in range(vocab_effective_size)}
     
     for i, token in enumerate(special_tokens):
-        vocab[256 + i] = token.encode("utf-8")
+        vocab[vocab_effective_size] = token.encode("utf-8")
+        vocab_effective_size += 1
     
     for k, v in vocab.items():
         print(f"{k}: {v},  {v.decode("utf-8", errors="ignore")}")
@@ -104,26 +106,75 @@ def train_bpe_function(
 
         # Pre-tokenize each doc
         for doc in docs:
+           
             matches = [match.group() for match in re.finditer(PAT, doc)]
-
+            matches = ["low", "low", "low", "low", "low", "lower", "lower", "widest","widest", "widest", "newest","newest","newest","newest","newest","newest",]
             # Merge: count <--- pick up here
             
             # count
             counts = Counter(matches)
             print(counts)
 
-            
             counts2 = {tuple(bytes([b]) for b in item.encode("utf-8")): count for item, count in counts.items()}
             print(counts2)
-            # counts['.'] = 3
-            max_freq = counts.most_common(1)[0][1]
-            all_top_items = [item for item, count in counts.items() if count == max_freq]
-            top_item = sorted(all_top_items)[-1]
+
+            # get pairwise counts
+            frequency={}
+            print("-----------")
+            for item, count in counts2.items():
+                if len(item) < 2: 
+                    continue
+                temp_count = {pair:count for pair in zip(item[:-1], item[1:])}
+                print(temp_count)
+
+                # check if a pair already exists
+                for pair, count in temp_count.items():
+                    if pair in frequency:
+                        frequency[pair] += count
+                    else:
+                        frequency[pair] = count
+                
+                
+                print("------")
+            print("-----------")    
+            print(sorted(frequency.items(), key=lambda x: x[1], reverse=True))
+                
+            ### later move to global location (across all docs)
+            
+            # find the top pair. highest frequency, and then lexicographically greater
+            top_pair = max(frequency.items(), key=lambda x: (x[1], x[0]))
+            print(f"top pair: {top_pair}")
+            print(f"top pair: {top_pair[0]}")
 
             # Merge
             
-            print(all_top_items)
-            print(top_item)
+            # add to vocab
+            new_vocab = b''.join(top_pair[0])
+            vocab[vocab_effective_size] = new_vocab
+            print(f"latest vocab: {vocab[vocab_effective_size]}")
+            vocab_effective_size += 1
+            
+            # replace
+            for item, count in counts2.items():
+                if len(item) < 2: 
+                    continue
+                
+                i = 0
+                for pair in zip(item[:-1], item[1:]):
+                    
+                    print(f"pair: {pair}, top pair: {top_pair[0]}")
+                    if (pair == top_pair[0]):
+                        print(f"new item udpate before: {item}")
+                        item = item[:i] + (new_vocab,) + item[i+2:]
+                        print(f"new item udpate after: {item}")
+                    i += 1
+            print(f"counts2 again: {counts2}")
+                        
+
+
+            
+            
+            
             
             
             
