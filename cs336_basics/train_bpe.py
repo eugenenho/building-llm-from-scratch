@@ -110,10 +110,21 @@ def train_bpe_function(
             
             # count
             counts = Counter(matches)
-            
-            # find highest frequency
-            
             print(counts)
+
+            counts2 = [item.encode("utf-8", errors="ignore"):count for item, count in counts.items()]
+            print(counts2)
+            # counts['.'] = 3
+            max_freq = counts.most_common(1)[0][1]
+            all_top_items = [item for item, count in counts.items() if count == max_freq]
+            top_item = sorted(all_top_items)[-1]
+
+            # Merge
+            
+            print(all_top_items)
+            print(top_item)
+            
+            
             
             
 
