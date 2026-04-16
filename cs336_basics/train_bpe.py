@@ -4,10 +4,6 @@ from typing import BinaryIO
 from collections import Counter
 from collections import defaultdict  
 
-# PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-# print(re.findall(PAT, "some text that I'll pre-tokenize"))
-
-
 
 # chunking
 def find_chunk_boundaries(
@@ -74,45 +70,59 @@ def load_chunks(file_path: str):
             chunks.append(chunk)
         return chunks
             
+# Pre-tokenization
+
+def pre_tokenize(docs: list, pattern = str):
+    return [match.group() for doc in docs for match in re.finditer(pattern, doc)]
+    
+    
 
 # Function
-
 def train_bpe_function(
         input_path: str,
         vocab_size: int,
         special_tokens: list[str],
 ):
     
-    # Initialize vocab & merges
+    # Initilalization / hyperparams
     vocab_effective_size = 256
     vocab = {i: bytes([i]) for i in range(vocab_effective_size)}
     merges = []
     min_frequency = 2
+    PRETOK_PATTERN = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    doc_split_pattern = "|".join(re.escape(token) for token in special_tokens)
 
     for i, token in enumerate(special_tokens):
         vocab[vocab_effective_size] = token.encode("utf-8")
         vocab_effective_size += 1
     
-    # for k, v in vocab.items():
-    #    print(f"{k}: {v},  {v.decode("utf-8", errors="ignore")}")
     
     # Open file, and get chunks back
-    chunks = load_chunks(input_path)
+    chunks = load_chunks(input_path) # chunks: list of strings
     
     # Pre-tokenize each doc separately, then add back
     pretok_chunk = []
-    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-    pattern = "|".join(re.escape(token) for token in special_tokens)
+    for chunk in chunks: 
+        docs = re.split(doc_split_pattern, chunk) # list of strings
+        pretok_chunk.extend(pre_tokenize(docs = docs, pattern = PRETOK_PATTERN))
+
+
+    # ### ORIGINAL CODE #####
+    # # Pre-tokenize each doc separately, then add back
+    # pretok_chunk = []
+    # PRETOK_PATTERN = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    # doc_split_pattern = "|".join(re.escape(token) for token in special_tokens)
     
-    for chunk in chunks:
-        docs = re.split(pattern, chunk)        
-        pretok_chunk.extend([match.group() for doc in docs for match in re.finditer(PAT, doc)])
-        # print(pretok_chunk)
+    # for chunk in chunks:
+    #     docs = re.split(doc_split_pattern, chunk)        
+    #     pretok_chunk.extend([match.group() for doc in docs for match in re.finditer(PRETOK_PATTERN, doc)])
+    #     # print(pretok_chunk)
     
     # only for initial debugging
     # pretok_chunk = ["low", "low", "low", "low", "low", "lower", "lower", "widest","widest", "widest", "newest","newest","newest","newest","newest","newest",]
     # print(pretok_chunk)
       
+    ### ORIGINAL CODE END #####
     
     # Count occurence of pre-tokenized tokens
     counts_naive = Counter(pretok_chunk)
