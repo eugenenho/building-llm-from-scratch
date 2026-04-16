@@ -2,10 +2,11 @@ import regex as re
 import os
 from typing import BinaryIO
 from collections import Counter
+from collections import defaultdict  
 
-PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-# PAT = r"""<\|endoftext\|>|'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-print(re.findall(PAT, "some text that I'll pre-tokenize"))
+# PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+# print(re.findall(PAT, "some text that I'll pre-tokenize"))
+
 
 
 # chunking
@@ -83,10 +84,12 @@ def train_bpe_function(
         special_tokens: list[str],
 ):
     
-    # Initialize vocab
+    # Initialize vocab & merges
     vocab_effective_size = 256
     vocab = {i: bytes([i]) for i in range(vocab_effective_size)}
-    
+    merges = []
+    min_frequency = 2
+
     for i, token in enumerate(special_tokens):
         vocab[vocab_effective_size] = token.encode("utf-8")
         vocab_effective_size += 1
@@ -97,93 +100,98 @@ def train_bpe_function(
     # Open file, and get chunks back
     chunks = load_chunks(input_path)
     
-    # Process each chunk    
+    # Pre-tokenize each doc separately, then add back
+    pretok_chunk = []
+    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    pattern = "|".join(re.escape(token) for token in special_tokens)
+    
     for chunk in chunks:
+        docs = re.split(pattern, chunk)        
+        pretok_chunk.extend([match.group() for doc in docs for match in re.finditer(PAT, doc)])
+        print(pretok_chunk)
+    
+    # only for initial debugging
+    # pretok_chunk = ["low", "low", "low", "low", "low", "lower", "lower", "widest","widest", "widest", "newest","newest","newest","newest","newest","newest",]
+    # print(pretok_chunk)
+      
+    
+    # Count occurence of pre-tokenized tokens
+    counts_naive = Counter(pretok_chunk)
+    # print(counts_naive)
+    
+    counts = {tuple(bytes([b]) for b in item.encode("utf-8")): count for item, count in counts_naive.items()} # dict[tuple(bytes,...), int]
+    # print(counts)
+    
+    
+    # Run a while loop
+    while (vocab_effective_size < vocab_size):
         
-        # Run pre-tokenization on your chunk and store the counts for each pre-token   
-        pattern = "|".join(re.escape(token) for token in special_tokens)
-        docs = re.split(pattern, chunk)
-
-        # Pre-tokenize each doc
-        for doc in docs:
-           
-            matches = [match.group() for match in re.finditer(PAT, doc)]
-            matches = ["low", "low", "low", "low", "low", "lower", "lower", "widest","widest", "widest", "newest","newest","newest","newest","newest","newest",]
-            # Merge: count <--- pick up here
-            
-            # count
-            counts = Counter(matches)
-            print(counts)
-
-            counts2 = {tuple(bytes([b]) for b in item.encode("utf-8")): count for item, count in counts.items()}
-            print(counts2)
-
-            # get pairwise counts
-            frequency={}
-            print("-----------")
-            for item, count in counts2.items():
-                if len(item) < 2: 
-                    continue
-                temp_count = {pair:count for pair in zip(item[:-1], item[1:])}
-                print(temp_count)
-
-                # check if a pair already exists
-                for pair, count in temp_count.items():
-                    if pair in frequency:
-                        frequency[pair] += count
-                    else:
-                        frequency[pair] = count
+        # get pair_freq counts
+        # pair_freq = get_pair_freq(counts, pair_freq)
+        pair_freq=defaultdict(int)
+        for word, count in counts.items():
+            if len(word) < 2: 
+                continue
+            for pair in zip(word[:-1], word[1:]):
+                pair_freq[pair] += count
                 
-                
-                print("------")
-            print("-----------")    
-            print(sorted(frequency.items(), key=lambda x: x[1], reverse=True))
-                
-            ### later move to global location (across all docs)
-            
-            # find the top pair. highest frequency, and then lexicographically greater
-            top_pair = max(frequency.items(), key=lambda x: (x[1], x[0]))
-            print(f"top pair: {top_pair}")
-            print(f"top pair: {top_pair[0]}")
+        # print("-----------")    
+        # print(f"counts: {counts}")
+        # print(f"pair_freq in a sorted way: {sorted(pair_freq.items(), key=lambda x: x[1], reverse=True)}")
 
-            # Merge
-            
-            # add to vocab
-            new_vocab = b''.join(top_pair[0])
-            vocab[vocab_effective_size] = new_vocab
-            print(f"latest vocab: {vocab[vocab_effective_size]}")
-            vocab_effective_size += 1
-            
-            # replace
-            for item, count in counts2.items():
-                if len(item) < 2: 
-                    continue
-                
-                i = 0
-                for pair in zip(item[:-1], item[1:]):
-                    
-                    print(f"pair: {pair}, top pair: {top_pair[0]}")
-                    if (pair == top_pair[0]):
-                        print(f"new item udpate before: {item}")
-                        item = item[:i] + (new_vocab,) + item[i+2:]
-                        print(f"new item udpate after: {item}")
-                    i += 1
-            print(f"counts2 again: {counts2}")
-                        
+        # find max pair 
+        if not pair_freq: 
+            print("while exit reason: no more pair_freq")
+            break                 # Exit condition: no more pairs available
+        top_pair = max(pair_freq.items(), key=lambda x: (x[1], x[0]))
+        if top_pair[1] < min_frequency: 
+            print("while exit reason: min frequency condition")
+            break   # Exit condition: min_frequency condition
+        # print(f"top pair: {top_pair}")
+        # print(f"top pair: {top_pair[0]}")
 
+        # add to vocab
+        new_vocab = b''.join(top_pair[0])
+        merges.append(top_pair[0])
+        vocab[vocab_effective_size] = new_vocab
+        # print(f"latest vocab: {vocab[vocab_effective_size]}")
+        vocab_effective_size += 1
 
+        # merge
+        # counts = merge(counts, top_pair)
+        
+        for word, count in list(counts.items()):
+            i = 0
+            indices = []
+            if len(word) < 2: 
+                continue
+            for pair in zip(word[:-1], word[1:]):
+                if pair == top_pair[0]:
+                    indices.append(i)
+                    # updated_word = word[:i] + (new_vocab,) + word[i+2:]
+                    # counts[updated_word] = counts.pop(word)
+                    # print(f"word: {word}, updated word: {updated_word}")
+                i += 1
             
+            # update the word
+            working_word = word
+            offset = 0
+            if len(indices) > 0:
+                for index in indices:
+                    updated_word = working_word[:index - offset] + (new_vocab,) + working_word[index+2-offset:]
+                    offset += 1
+                # print(f"word: {word}, updated word: {updated_word}")
+                counts[updated_word] = counts.pop(word)
+        # print(counts)
+    print(f"vocab_size: {vocab_effective_size}")
+    
+    with open("output.txt", "w") as f:                                                                       
+        f.write(str(vocab) + "\n")                                                                           
+        f.write(str(merges) + "\n")  
+    return vocab, merges
+    #print(f"vocab: {vocab}")
+    #print(f"merges: {merges}")
             
-            
-            
-            
-            
-            
-
-            print(matches)
-            break
-
-        break
             
 
 
@@ -195,7 +203,7 @@ def train_bpe_function(
 if __name__ == "__main__":
     
     file_path = "data/TinyStoriesV2-GPT4-valid.txt"
-    train_bpe_function(file_path, vocab_size= 300, special_tokens=["<|endoftext|>",])
+    train_bpe_function(file_path, vocab_size= 10000, special_tokens=["<|endoftext|>",])
 
     
  
