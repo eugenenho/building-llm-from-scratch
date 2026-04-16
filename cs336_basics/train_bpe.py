@@ -64,7 +64,6 @@ def load_chunks(file_path: str):
         num_processes = 4
         
         boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
-        print(boundaries)
 
         # The following is a serial implementation, but you can parallelize this
         # by sending each start/end pair to a set of processes.
@@ -94,8 +93,8 @@ def train_bpe_function(
         vocab[vocab_effective_size] = token.encode("utf-8")
         vocab_effective_size += 1
     
-    for k, v in vocab.items():
-        print(f"{k}: {v},  {v.decode("utf-8", errors="ignore")}")
+    # for k, v in vocab.items():
+    #    print(f"{k}: {v},  {v.decode("utf-8", errors="ignore")}")
     
     # Open file, and get chunks back
     chunks = load_chunks(input_path)
@@ -108,7 +107,7 @@ def train_bpe_function(
     for chunk in chunks:
         docs = re.split(pattern, chunk)        
         pretok_chunk.extend([match.group() for doc in docs for match in re.finditer(PAT, doc)])
-        print(pretok_chunk)
+        # print(pretok_chunk)
     
     # only for initial debugging
     # pretok_chunk = ["low", "low", "low", "low", "low", "lower", "lower", "widest","widest", "widest", "newest","newest","newest","newest","newest","newest",]
@@ -127,7 +126,6 @@ def train_bpe_function(
     while (vocab_effective_size < vocab_size):
         
         # get pair_freq counts
-        # pair_freq = get_pair_freq(counts, pair_freq)
         pair_freq=defaultdict(int)
         for word, count in counts.items():
             if len(word) < 2: 
@@ -147,8 +145,12 @@ def train_bpe_function(
         if top_pair[1] < min_frequency: 
             print("while exit reason: min frequency condition")
             break   # Exit condition: min_frequency condition
-        # print(f"top pair: {top_pair}")
-        # print(f"top pair: {top_pair[0]}")
+        
+        # debugging
+        max_count = max(pair_freq.values())   
+        top_pairs = [(pair, count) for pair, count in pair_freq.items() if count == max_count]  
+        # print(f"merge #: {len(merges)},    top pair: {top_pair},    other top pairs: {top_pairs}")
+        
 
         # add to vocab
         new_vocab = b''.join(top_pair[0])
@@ -168,21 +170,21 @@ def train_bpe_function(
             for pair in zip(word[:-1], word[1:]):
                 if pair == top_pair[0]:
                     indices.append(i)
-                    # updated_word = word[:i] + (new_vocab,) + word[i+2:]
-                    # counts[updated_word] = counts.pop(word)
-                    # print(f"word: {word}, updated word: {updated_word}")
                 i += 1
             
             # update the word
-            working_word = word
-            offset = 0
+                       
             if len(indices) > 0:
-                for index in indices:
-                    updated_word = working_word[:index - offset] + (new_vocab,) + working_word[index+2-offset:]
-                    offset += 1
-                # print(f"word: {word}, updated word: {updated_word}")
-                counts[updated_word] = counts.pop(word)
-        # print(counts)
+                q = 0
+                segment = word[:indices[q]] + (new_vocab,)
+            
+                while q + 1 < len(indices):
+                    segment = segment + word[indices[q] + 2: indices[q+1]] + (new_vocab,)
+                    q += 1
+                segment = segment + word[indices[q]+2:len(word)+1]
+                # if len(indices) > 1: print(f"word: {word}, updated word: {segment}, indices: {indices}")
+                counts[segment] = counts.pop(word)
+            
     print(f"vocab_size: {vocab_effective_size}")
     
     with open("output.txt", "w") as f:                                                                       
