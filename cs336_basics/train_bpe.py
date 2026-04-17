@@ -5,6 +5,9 @@ import sys
 import resource
 import signal
 import gc
+import json
+import cProfile
+import pstats
 from typing import BinaryIO
 from collections import Counter
 from collections import defaultdict  
@@ -60,11 +63,10 @@ def find_chunk_boundaries(
 
 
 ## Usage
-def load_chunks(file_path: str):
+def load_chunks(file_path: str, num_processes = int):
     
     with open(file_path, "rb") as f:
-        num_processes = 4
-        
+                
         boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
 
         # The following is a serial implementation, but you can parallelize this
@@ -94,8 +96,6 @@ def train_bpe_function(
     print("train_bpe_function called!")
  
     # Initilalization / hyperparams
-    """
-    """
     vocab_effective_size = 256
     vocab = {i: bytes([i]) for i in range(vocab_effective_size)}
     for i, token in enumerate(special_tokens):
@@ -103,16 +103,17 @@ def train_bpe_function(
         vocab_effective_size += 1 
     merges = []
     min_frequency = 2
+    N = 4               # parallel processing
     PRETOK_PATTERN = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
     doc_split_pattern = "|".join(re.escape(token) for token in special_tokens)
     
     # Open file, and get chunks back
-    chunks = load_chunks(input_path) # chunks: list of strings
+    chunks = load_chunks(input_path, N) # chunks: list of strings
     print("chunks returned!")
     
     # Pretokenize, parallel
     t1= time.time()
-    with Pool(processes = 4) as pool:
+    with Pool(processes = N) as pool:
         naive_counters = pool.map(partial(pre_tokenize, doc_split_pattern = doc_split_pattern, pretok_pattern = PRETOK_PATTERN), chunks) #list of Counters
     naive_counters_sum = sum(naive_counters, Counter())
     counts = {tuple(bytes([b]) for b in item.encode("utf-8")): count for item, count in naive_counters_sum.items()} # dict[tuple(bytes,...), int]
@@ -144,7 +145,7 @@ def train_bpe_function(
             sys.stdout.flush()
            
 
-        # find max pair 
+        # find top pair 
         if not pair_freq: 
             print("while exit reason: no more pair_freq")
             break                 # Exit condition: no more pairs available
@@ -177,7 +178,6 @@ def train_bpe_function(
         merges.append(top_pair[0])
         vocab[vocab_effective_size] = new_vocab
         vocab_effective_size += 1
-        pair_freq.pop(top_pair[0]) # remove from pair_freq, as this top_pair[0], a tuple, will no longer exist
         
         # merge 
         words_to_change = []
@@ -218,75 +218,15 @@ def train_bpe_function(
 
             for old_pair in old_pairs:
                 pair_freq[old_pair] -= count
+                if pair_freq[old_pair] <= 0:
+                    pair_freq.pop(old_pair)
                 pair_loc[old_pair].discard(word)
                 if not pair_loc[old_pair]: pair_loc.pop(old_pair) 
             
             for new_pair in new_pairs:
                 pair_freq[new_pair] += count
                 pair_loc[new_pair].add(segment)
-            
-
-           
-
-            # i = 0
-            # indices = []
-            # len_word = len(word)
-            # pairs = list(zip(word[:-1], word[1:])) # list of tuples
-            # if len_word < 2: 
-            #     continue
-            # for pair in pairs:
-            #     if pair == top_pair[0]:
-            #         indices.append(i)
-            #     i += 1
-            
-            # # update the word
-            # len_indices = len(indices)           
-            # if len_indices > 0:
-            #     q = 0
-            #     segment = word[:indices[q]] + (new_vocab,)
-            
-            #     while q + 1 < len_indices:
-            #         segment = segment + word[indices[q] + 2: indices[q+1]] + (new_vocab,)
-            #         q += 1
-            #     segment = segment + word[indices[q]+2:len_word+1]
-            #     # if len(indices) > 1: print(f"word: {word}, updated word: {segment}, indices: {indices}")
-            #     words_to_change.append((segment, word))
-                
-                
-            #     # update pair_freq: decrement non-existent pairs
-            #     decremented_indices =[]
-            #     for q in range(len_indices):
-                    
-            #         index_one_ahead = indices[q]-1
-            #         index_one_behind = indices[q]+1
-
-            #         if (index_one_ahead >= 0) and (index_one_ahead not in decremented_indices): 
-            #             pair_freq[pairs[index_one_ahead]] -= count
-            #             if pair_freq[pairs[index_one_ahead]] <= 0:
-            #                 del pair_freq[pairs[index_one_ahead]]
-            #                 pair_loc.pop(pairs[index_one_ahead], None)
-            #             decremented_indices.append(index_one_ahead)
-                    
-            #         if (index_one_behind < len_word - 1) and (index_one_behind not in decremented_indices):
-            #             pair_freq[pairs[index_one_behind]] -= count
-            #             if pair_freq[pairs[index_one_behind]] <= 0:
-            #                 del pair_freq[pairs[index_one_behind]]
-            #                 pair_loc.pop(pairs[index_one_behind], None)
-            #             decremented_indices.append(index_one_behind)
-                
-            #     # update pair_Freq: increment newly formed pairs
-            #     for segment_pair in zip(segment[:-1], segment[1:]):
-            #         if new_vocab in segment_pair:
-            #             pair_freq[segment_pair] += count
-            #         pair_loc[segment_pair].add(segment) # update pair_loc. add the newly formed pairs as keys, and the current word as value
-                
-            #     for old_pair in pairs:                                   # update pair_loc. for all other pairs that contained the old word (word), replace it with new owrd(segment)
-            #         pair_loc[old_pair].discard(word)
-            #         if not pair_loc[old_pair]: pair_loc.pop(old_pair) 
-              
-
-        # pair_loc.pop(top_pair[0], None) # remove from pair_loc, as this top_pai[0], a tuple, will no longer exist
-
+  
         # update counts dict
         for word_tuple in words_to_change:
             counts[word_tuple[0]] = counts.pop(word_tuple[1]) # update counts dict
@@ -305,9 +245,9 @@ def train_bpe_function(
     print(f"pre-tok time: {t2 - t1:.3f}s")
     print(f"merge time: {t3 - t2:.3f}s")
     
-    with open("output.txt", "w") as f:                                                                       
-        f.write(str(vocab) + "\n")                                                                           
-        f.write(str(merges) + "\n")  
+    with open("outputs/counts.json", "w") as f:
+            json.dump({b''.join(k).decode("latin-1"): str(v) for k, v in counts.items()}, f, indent=2)
+    
     return vocab, merges
             
             
@@ -331,8 +271,25 @@ if __name__ == "__main__":
       import traceback
       try:
         print("starting")
+        profiler = cProfile.Profile()
+        profiler.enable()
         file_path = "data/TinyStoriesV2-GPT4-train.txt"
-        train_bpe_function(file_path, vocab_size=10000, special_tokens=["<|endoftext|>"])
+        
+        vocab, merges = train_bpe_function(file_path, vocab_size=10000, special_tokens=["<|endoftext|>"])
+        profiler.disable()
+        profiler.dump_stats("outputs/bpe_training_output.prof")
+        with open("outputs/vocab.json", "w") as f:
+            json.dump({str(k): v.decode("latin-1") for k, v in vocab.items()}, f, indent=2)
+
+        with open("outputs/merges.txt", "w") as f:
+            for a, b in merges:
+                f.write(f"{a.decode('latin-1')} {b.decode('latin-1')}\n")
+        
+        with open("outputs/output.txt", "w") as f:                                                                       
+            f.write(str(vocab) + "\n")                                                                           
+            f.write(str(merges) + "\n")  
+    
+    
       except BaseException as e:
         print(f"ERROR: {type(e).__name__}: {e}")
         traceback.print_exc()
