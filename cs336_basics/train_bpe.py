@@ -1,9 +1,11 @@
 import regex as re
 import os
+import time
 from typing import BinaryIO
 from collections import Counter
 from collections import defaultdict  
-
+from multiprocessing import Pool
+from functools import partial
 
 # chunking
 def find_chunk_boundaries(
@@ -57,7 +59,7 @@ def find_chunk_boundaries(
 def load_chunks(file_path: str):
     
     with open(file_path, "rb") as f:
-        num_processes = 4
+        num_processes = os.cpu_count()
         
         boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
 
@@ -72,9 +74,11 @@ def load_chunks(file_path: str):
             
 # Pre-tokenization
 
-def pre_tokenize(docs: list, pattern = str):
-    return [match.group() for doc in docs for match in re.finditer(pattern, doc)]
-    
+def pre_tokenize(chunk: str, doc_split_pattern: str, pretok_pattern: str):
+    docs = re.split(doc_split_pattern, chunk) # list of strings
+    pretok_chunk = [match.group() for doc in docs for match in re.finditer(pretok_pattern, doc)] # list of strings
+    return Counter(pretok_chunk)
+
     
 
 # Function
@@ -100,53 +104,39 @@ def train_bpe_function(
     # Open file, and get chunks back
     chunks = load_chunks(input_path) # chunks: list of strings
     
-    # Pre-tokenize each doc separately, then add back
-    pretok_chunk = []
-    for chunk in chunks: 
-        docs = re.split(doc_split_pattern, chunk) # list of strings
-        pretok_chunk.extend(pre_tokenize(docs = docs, pattern = PRETOK_PATTERN))
-
-
-    # ### ORIGINAL CODE #####
     # # Pre-tokenize each doc separately, then add back
     # pretok_chunk = []
-    # PRETOK_PATTERN = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-    # doc_split_pattern = "|".join(re.escape(token) for token in special_tokens)
+    # for chunk in chunks: 
+    #     docs = re.split(doc_split_pattern, chunk) # list of strings
+    #     pretok_chunk.extend(pre_tokenize(docs = docs, pattern = PRETOK_PATTERN))
+
+   
+    # # Count occurence of pre-tokenized tokens
+    # counts_naive = Counter(pretok_chunk)
+    # # print(counts_naive)
     
-    # for chunk in chunks:
-    #     docs = re.split(doc_split_pattern, chunk)        
-    #     pretok_chunk.extend([match.group() for doc in docs for match in re.finditer(PRETOK_PATTERN, doc)])
-    #     # print(pretok_chunk)
+    # counts = {tuple(bytes([b]) for b in item.encode("utf-8")): count for item, count in counts_naive.items()} # dict[tuple(bytes,...), int]
+    # # print(counts)
+
+    # parallel version
+    t1= time.time()
+    with Pool(processes = os.cpu_count()) as pool:
+        naive_counters = pool.map(partial(pre_tokenize, doc_split_pattern = doc_split_pattern, pretok_pattern = PRETOK_PATTERN), chunks) #list of Counters
+    naive_counters_sum = sum(naive_counters, Counter())
+    counts = {tuple(bytes([b]) for b in item.encode("utf-8")): count for item, count in naive_counters_sum.items()} # dict[tuple(bytes,...), int]
     
-    # only for initial debugging
-    # pretok_chunk = ["low", "low", "low", "low", "low", "lower", "lower", "widest","widest", "widest", "newest","newest","newest","newest","newest","newest",]
-    # print(pretok_chunk)
-      
-    ### ORIGINAL CODE END #####
-    
-    # Count occurence of pre-tokenized tokens
-    counts_naive = Counter(pretok_chunk)
-    # print(counts_naive)
-    
-    counts = {tuple(bytes([b]) for b in item.encode("utf-8")): count for item, count in counts_naive.items()} # dict[tuple(bytes,...), int]
-    # print(counts)
-    
+    # get pair_freq counts
+    pair_freq=defaultdict(int)
+    for word, count in counts.items():
+        if len(word) < 2: 
+            continue
+        for pair in zip(word[:-1], word[1:]):
+            pair_freq[pair] += count
+    t2 = time.time()
     
     # Run a while loop
     while (vocab_effective_size < vocab_size):
         
-        # get pair_freq counts
-        pair_freq=defaultdict(int)
-        for word, count in counts.items():
-            if len(word) < 2: 
-                continue
-            for pair in zip(word[:-1], word[1:]):
-                pair_freq[pair] += count
-                
-        # print("-----------")    
-        # print(f"counts: {counts}")
-        # print(f"pair_freq in a sorted way: {sorted(pair_freq.items(), key=lambda x: x[1], reverse=True)}")
-
         # find max pair 
         if not pair_freq: 
             print("while exit reason: no more pair_freq")
@@ -156,55 +146,81 @@ def train_bpe_function(
             print("while exit reason: min frequency condition")
             break   # Exit condition: min_frequency condition
         
-        # debugging
-        max_count = max(pair_freq.values())   
-        top_pairs = [(pair, count) for pair, count in pair_freq.items() if count == max_count]  
+        # debugging only
+        # max_count = max(pair_freq.values())   
+        # top_pairs = [(pair, count) for pair, count in pair_freq.items() if count == max_count]  
         # print(f"merge #: {len(merges)},    top pair: {top_pair},    other top pairs: {top_pairs}")
         
-
         # add to vocab
         new_vocab = b''.join(top_pair[0])
         merges.append(top_pair[0])
         vocab[vocab_effective_size] = new_vocab
-        # print(f"latest vocab: {vocab[vocab_effective_size]}")
         vocab_effective_size += 1
+        pair_freq.pop(top_pair[0]) # remove from pair_freq, as this top_pair[0], a tuple, will no longer exist
 
-        # merge
-        # counts = merge(counts, top_pair)
-        
+        # merge       
         for word, count in list(counts.items()):
             i = 0
             indices = []
-            if len(word) < 2: 
+            len_word = len(word)
+            pairs = list(zip(word[:-1], word[1:])) # list of tuples
+            if len_word < 2: 
                 continue
-            for pair in zip(word[:-1], word[1:]):
+            for pair in pairs:
                 if pair == top_pair[0]:
                     indices.append(i)
                 i += 1
             
             # update the word
-                       
-            if len(indices) > 0:
+            len_indices = len(indices)           
+            if len_indices > 0:
                 q = 0
                 segment = word[:indices[q]] + (new_vocab,)
             
-                while q + 1 < len(indices):
+                while q + 1 < len_indices:
                     segment = segment + word[indices[q] + 2: indices[q+1]] + (new_vocab,)
                     q += 1
-                segment = segment + word[indices[q]+2:len(word)+1]
+                segment = segment + word[indices[q]+2:len_word+1]
                 # if len(indices) > 1: print(f"word: {word}, updated word: {segment}, indices: {indices}")
-                counts[segment] = counts.pop(word)
-            
+                counts[segment] = counts.pop(word) # update counts dict
+
+                # update pair_freq: decrement non-existent pairs
+                decremented_indices =[]
+                for q in range(len_indices):
+                    
+                    index_one_ahead = indices[q]-1
+                    index_one_behind = indices[q]+1
+
+                    if (index_one_ahead >= 0) and (index_one_ahead not in decremented_indices):
+                        pair_freq[pairs[index_one_ahead]] -= count
+                        decremented_indices.append(index_one_ahead)
+                    
+                    if (index_one_behind < len_word - 1) and (index_one_behind not in decremented_indices):
+                        pair_freq[pairs[index_one_behind]] -= count
+                        decremented_indices.append(index_one_behind)
+                
+                # update pair_Freq: increment newly formed pairs
+                for segment_pair in zip(segment[:-1], segment[1:]):
+                    if new_vocab in segment_pair:
+                        pair_freq[segment_pair] += count
+                
+                
+
+
+    t3 = time.time()
+
     print(f"vocab_size: {vocab_effective_size}")
+    print(f"pre-tok time: {t2 - t1:.3f}s")
+    print(f"merge time: {t3 - t2:.3f}s")
     
     with open("output.txt", "w") as f:                                                                       
         f.write(str(vocab) + "\n")                                                                           
         f.write(str(merges) + "\n")  
     return vocab, merges
-    #print(f"vocab: {vocab}")
-    #print(f"merges: {merges}")
             
             
+
+            # . Looking at your merge loop — for each merge, you iterate over all entries in counts (line 161). As the vocabulary grows, this gets expensive. Think about: do you need to scan every word on every merge, or could you track which words contain a given pair more efficiently?
 
 
 
@@ -214,7 +230,7 @@ def train_bpe_function(
 # Main run
 if __name__ == "__main__":
     
-    file_path = "data/TinyStoriesV2-GPT4-valid.txt"
+    file_path = "data/TinyStoriesV2-GPT4-train.txt"
     train_bpe_function(file_path, vocab_size= 10000, special_tokens=["<|endoftext|>",])
 
     
