@@ -155,7 +155,7 @@ def train_bpe_function(
         if max_time > 0.1:
             print(f"SLOW max at merge {len(merges)}: {max_time:.2f}s, pair_freq size: {len(pair_freq)}")
             sys.stdout.flush()
-
+    
         
         loc_size = len(pair_loc[top_pair[0]])
         if loc_size > 1000:
@@ -184,65 +184,108 @@ def train_bpe_function(
         
         for word in list(pair_loc[top_pair[0]]): # itearting through the list-converted set of words that top_pair belong to
             count = counts[word]
-        
-            i = 0
-            indices = []
-            len_word = len(word)
-            pairs = list(zip(word[:-1], word[1:])) # list of tuples
-            if len_word < 2: 
-                continue
-            for pair in pairs:
-                if pair == top_pair[0]:
-                    indices.append(i)
-                i += 1
-            
-            # update the word
-            len_indices = len(indices)           
-            if len_indices > 0:
-                q = 0
-                segment = word[:indices[q]] + (new_vocab,)
-            
-                while q + 1 < len_indices:
-                    segment = segment + word[indices[q] + 2: indices[q+1]] + (new_vocab,)
-                    q += 1
-                segment = segment + word[indices[q]+2:len_word+1]
-                # if len(indices) > 1: print(f"word: {word}, updated word: {segment}, indices: {indices}")
-                words_to_change.append((segment, word))
-                
-                
-                # update pair_freq: decrement non-existent pairs
-                decremented_indices =[]
-                for q in range(len_indices):
-                    
-                    index_one_ahead = indices[q]-1
-                    index_one_behind = indices[q]+1
 
-                    if (index_one_ahead >= 0) and (index_one_ahead not in decremented_indices): 
-                        pair_freq[pairs[index_one_ahead]] -= count
-                        if pair_freq[pairs[index_one_ahead]] <= 0:
-                            del pair_freq[pairs[index_one_ahead]]
-                            pair_loc.pop(pairs[index_one_ahead], None)
-                        decremented_indices.append(index_one_ahead)
+            index = 0
+            segment = ()
+            while index < len(word) - 1:
+                # look at word[index] and word[index+1] together always
+                span = (word[index], word[index+1])
+                if span == top_pair[0]:     # if the span is top pair
+                    segment += (new_vocab,)
+                    index += 2
+                else:
+                    segment += (word[index],)
+                    index += 1
+            if index == len(word) - 1: # in this case, the last word was left uncovered
+                segment += (word[index],)
+
+            # add to the list of words to change later, out of the for loop
+            words_to_change.append((segment, word))
+
+            # update pair_freq and pair_loc: decrement non-existent pairs
+            """
+            For each word that gets updated:
+                1. Walk all pairs in the old word → decrement each from pair_freq by count, remove word from pair_loc
+                2. Walk all pairs in the new segment → increment each in pair_freq by count, add segment to pair_loc
+
+                Pairs that exist in both old and new cancel out (decremented then incremented). The merged pair gets decremented but
+                never incremented (gone). New pairs around new_vocab get incremented but were never decremented (created). Clean up
+                any entries that hit zero.
+            """
+
+            old_pairs = list(zip(word[:-1], word[1:])) # list of tuples
+            new_pairs = list(zip(segment[:-1], segment[1:])) # list of tuples
+
+            for old_pair in old_pairs:
+                pair_freq[old_pair] -= count
+                pair_loc[old_pair].discard(word)
+                if not pair_loc[old_pair]: pair_loc.pop(old_pair) 
+            
+            for new_pair in new_pairs:
+                pair_freq[new_pair] += count
+                pair_loc[new_pair].add(segment)
+            
+
+           
+
+            # i = 0
+            # indices = []
+            # len_word = len(word)
+            # pairs = list(zip(word[:-1], word[1:])) # list of tuples
+            # if len_word < 2: 
+            #     continue
+            # for pair in pairs:
+            #     if pair == top_pair[0]:
+            #         indices.append(i)
+            #     i += 1
+            
+            # # update the word
+            # len_indices = len(indices)           
+            # if len_indices > 0:
+            #     q = 0
+            #     segment = word[:indices[q]] + (new_vocab,)
+            
+            #     while q + 1 < len_indices:
+            #         segment = segment + word[indices[q] + 2: indices[q+1]] + (new_vocab,)
+            #         q += 1
+            #     segment = segment + word[indices[q]+2:len_word+1]
+            #     # if len(indices) > 1: print(f"word: {word}, updated word: {segment}, indices: {indices}")
+            #     words_to_change.append((segment, word))
+                
+                
+            #     # update pair_freq: decrement non-existent pairs
+            #     decremented_indices =[]
+            #     for q in range(len_indices):
                     
-                    if (index_one_behind < len_word - 1) and (index_one_behind not in decremented_indices):
-                        pair_freq[pairs[index_one_behind]] -= count
-                        if pair_freq[pairs[index_one_behind]] <= 0:
-                            del pair_freq[pairs[index_one_behind]]
-                            pair_loc.pop(pairs[index_one_behind], None)
-                        decremented_indices.append(index_one_behind)
+            #         index_one_ahead = indices[q]-1
+            #         index_one_behind = indices[q]+1
+
+            #         if (index_one_ahead >= 0) and (index_one_ahead not in decremented_indices): 
+            #             pair_freq[pairs[index_one_ahead]] -= count
+            #             if pair_freq[pairs[index_one_ahead]] <= 0:
+            #                 del pair_freq[pairs[index_one_ahead]]
+            #                 pair_loc.pop(pairs[index_one_ahead], None)
+            #             decremented_indices.append(index_one_ahead)
+                    
+            #         if (index_one_behind < len_word - 1) and (index_one_behind not in decremented_indices):
+            #             pair_freq[pairs[index_one_behind]] -= count
+            #             if pair_freq[pairs[index_one_behind]] <= 0:
+            #                 del pair_freq[pairs[index_one_behind]]
+            #                 pair_loc.pop(pairs[index_one_behind], None)
+            #             decremented_indices.append(index_one_behind)
                 
-                # update pair_Freq: increment newly formed pairs
-                for segment_pair in zip(segment[:-1], segment[1:]):
-                    if new_vocab in segment_pair:
-                        pair_freq[segment_pair] += count
-                    pair_loc[segment_pair].add(segment) # update pair_loc. add the newly formed pairs as keys, and the current word as value
+            #     # update pair_Freq: increment newly formed pairs
+            #     for segment_pair in zip(segment[:-1], segment[1:]):
+            #         if new_vocab in segment_pair:
+            #             pair_freq[segment_pair] += count
+            #         pair_loc[segment_pair].add(segment) # update pair_loc. add the newly formed pairs as keys, and the current word as value
                 
-                for old_pair in pairs:                                   # update pair_loc. for all other pairs that contained the old word (word), replace it with new owrd(segment)
-                    pair_loc[old_pair].discard(word)
-                    if not pair_loc[old_pair]: pair_loc.pop(old_pair) 
+            #     for old_pair in pairs:                                   # update pair_loc. for all other pairs that contained the old word (word), replace it with new owrd(segment)
+            #         pair_loc[old_pair].discard(word)
+            #         if not pair_loc[old_pair]: pair_loc.pop(old_pair) 
               
 
-        pair_loc.pop(top_pair[0], None) # remove from pair_loc, as this top_pai[0], a tuple, will no longer exist
+        # pair_loc.pop(top_pair[0], None) # remove from pair_loc, as this top_pai[0], a tuple, will no longer exist
 
         # update counts dict
         for word_tuple in words_to_change:
