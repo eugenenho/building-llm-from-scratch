@@ -1,5 +1,6 @@
 from typing import Iterable, Iterator
 import regex as re
+import json
 
 class Tokenizer:
     def __init__(self, vocab, merges, special_tokens = None):
@@ -14,17 +15,18 @@ class Tokenizer:
         
         # assume: JSON
         with open(vocab_filepath, "r") as f1:
-            vocab_dump = f1.read() # dict[str, str] but needs to be dict[int, bytes]
-        vocab = {int(k): v.encode("utf-8") for k, v in vocab_dump.items()}
+            vocab_dump = json.load(f1) # dict[str, str] but needs to be dict[int, bytes]
+        vocab = {int(k): v.encode("latin-1") for k, v in vocab_dump.items()}
         
         # assume: txt
         merges = [] # needs to be list[tuple[bytes, bytes]]
         with open(merges_filepath, "r") as f2:
             for line in f2: 
-                list_of_words = line.rstrip().split() # [str, str]
-                merges.append((list_of_words[0].encode("utf-8"), list_of_words[1].encode("utf-8")))
+                list_of_words = line.rstrip().rsplit(" ", 1) # [str, str]
+                if len(list_of_words) < 2: continue
+                merges.append((list_of_words[0].encode("latin-1"), list_of_words[1].encode("latin-1")))
 
-        # print("testing from_files: \n vocab: {vocab} \n\n\n merges: {merges}")       
+        # print(f"testing from_files: \n vocab: {vocab} \n\n\n merges: {merges[:100]}")       
 
         return cls(vocab, merges, special_tokens)
 
@@ -93,53 +95,6 @@ class Tokenizer:
             # Once you exit the for loop, you have gone through all the pretokens
             return vocab_index_list
                            
-
-
-            #### OLD CODE. NAIVE IMPLEMENTAION
-
-            #     # Loop until no more merges are possible, which means:
-            #     #   1 - reached the end of the self.merges list
-            #     #   2 - no more tuples of bytes to merge
-                
-            #     merges_index = 0
-            #     merges_len = len(self.merges)
-
-            #     while merges_index < merges_len and len(pretoken_byte) > 1:
-                    
-            #         # for each item in self.merges, sweep across pretoken_byte to see if there's a match.
-            #         # If there's a match, add the 
-            #         pretoken_index = 0
-            #         pretoken_byte_new = ()
-            #         # print(f"    pretoken_byte: {pretoken_byte}, merges_index: {merges_index}, merges: {self.merges[merges_index]}")
-
-            #         while pretoken_index < len(pretoken_byte) - 1:
-            #             span = (pretoken_byte[pretoken_index], pretoken_byte[pretoken_index + 1]) # tuple of bytes
-                        
-
-            #             if span == self.merges[merges_index]:
-            #                 pretoken_byte_new += (b''.join(span),) # add the merged span
-            #                 # print(f"        pretoken_index: {pretoken_index}, MERGED. span: {span}, pretokenbytenew: {pretoken_byte_new}")
-            #                 pretoken_index += 2                 # skip one index
-                            
-            #             else:
-            #                 pretoken_byte_new += (pretoken_byte[pretoken_index],)
-            #                 # print(f"        pretoken_index: {pretoken_index}, NO MERGE. span: {span}, pretokenbytenew: {pretoken_byte_new}")
-            #                 pretoken_index += 1                 # regular incrementing
-                    
-            #         # print(f"        pretoekn_index: {pretoken_index}, pretoken_len: {len(pretoken_byte)}")
-            #         if pretoken_index == len(pretoken_byte) - 1:        # in case we exited while with the index at the very last position, dangling byte
-            #             pretoken_byte_new += (pretoken_byte[pretoken_index],)
-            #         # print(f"            pretoken_byte_new dangling situation: {pretoken_byte_new}")
-
-            #         pretoken_byte = pretoken_byte_new
-            #         merges_index += 1
-                        
-            #     # Once you exit the while loop, you have a tuple of bytes that can no longer be merged.
-            #     # Add this to the final vocab index list. This concludes the loop for this pretoken. Move on to the next pretoken
-            #     vocab_index_list.extend(self.reverse_vocab[byte] for byte in pretoken_byte)
-            # # print(f"vocab index list: {vocab_index_list}")
-            # return vocab_index_list
-
         # Special token processing
         vocab_index_list = []
         if self.special_tokens:
