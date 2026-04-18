@@ -204,13 +204,16 @@ def train_bpe_function(
 
             # update pair_freq and pair_loc: decrement non-existent pairs
             """
-            For each word that gets updated:
-                1. Walk all pairs in the old word → decrement each from pair_freq by count, remove word from pair_loc
-                2. Walk all pairs in the new segment → increment each in pair_freq by count, add segment to pair_loc
-
-                Pairs that exist in both old and new cancel out (decremented then incremented). The merged pair gets decremented but
-                never incremented (gone). New pairs around new_vocab get incremented but were never decremented (created). Clean up
-                any entries that hit zero.
+            For each word that gets updated: old word (word) -> new word (segment), e.g. (s, t, a, r) -> (st, a, r)
+                1. Remove the impact of this old word on pair_freq and pair_loc. 
+                    This old word is disappearing, so any pair frequency contribution from this word should also disappear. (s, t), (t, a), (a, r)
+                    This old word is disappearing, so this word should disappear from the location sets of all the pairs, e.g. (s, t), (t, a), and (a, r) should not have (s, t, a, r) anymore
+                2. Add the impact of the new word (var name: segment)to pair_freq and pair_loc
+                    This new word newly appeared, so any pair frequency contribution should now be logged. (st, a), (a, r)
+                        Note that --> for the pair that didn't change, e.g. (a, r) in this case, it cancels out the removal in step 1
+                    This new word newly appeared, so it should now appeaer in the location sets of all relevant pairs, e.g. (st, a), (a, r) should now have (st, a, r)
+                
+                We also clean up any entries within pair_freq and pair_loc that hit zero. 
             """
 
             old_pairs = list(zip(word[:-1], word[1:])) # list of tuples
@@ -236,8 +239,6 @@ def train_bpe_function(
             print(f"SLOW merge {len(merges)-1}: {merge_time:.2f}s, pair_loc size: {loc_size}, updated words: {words_to_change}")
             sys.stdout.flush()
         
-
-                
                 
     t3 = time.time()
 
@@ -245,21 +246,14 @@ def train_bpe_function(
     print(f"pre-tok time: {t2 - t1:.3f}s")
     print(f"merge time: {t3 - t2:.3f}s")
     
-    with open("outputs/counts.json", "w") as f:
+    with open("outputs_owt_train/counts.json", "w") as f:
             json.dump({b''.join(k).decode("latin-1"): str(v) for k, v in counts.items()}, f, indent=2)
     
     return vocab, merges
             
-            
-
-
-
     
 # Main run
 
-#   import cProfile
-#   file_path = "data/TinyStoriesV2-GPT4-train.txt"
-#   cProfile.run('train_bpe_function(file_path, vocab_size=10000, special_tokens=["<|endoftext|>"])','bpe_profile.prof')
 def handler(signum, frame):
     print(f"Received signal {signum}")
     sys.stdout.flush()
@@ -273,19 +267,21 @@ if __name__ == "__main__":
         print("starting")
         profiler = cProfile.Profile()
         profiler.enable()
-        file_path = "data/TinyStoriesV2-GPT4-train.txt"
+        
+        # file_path = "data/TinyStoriesV2-GPT4-train.txt"
+        file_path = "data/owt_train.txt"
         
         vocab, merges = train_bpe_function(file_path, vocab_size=10000, special_tokens=["<|endoftext|>"])
         profiler.disable()
-        profiler.dump_stats("outputs/bpe_training_output.prof")
-        with open("outputs/vocab.json", "w") as f:
+        profiler.dump_stats("outputs_owt_train/bpe_training_output.prof")
+        with open("outputs_owt_train/vocab.json", "w") as f:
             json.dump({str(k): v.decode("latin-1") for k, v in vocab.items()}, f, indent=2)
 
-        with open("outputs/merges.txt", "w") as f:
+        with open("outputs_owt_train/merges.txt", "w") as f:
             for a, b in merges:
                 f.write(f"{a.decode('latin-1')} {b.decode('latin-1')}\n")
         
-        with open("outputs/output.txt", "w") as f:                                                                       
+        with open("outputs_owt_train/output.txt", "w") as f:                                                                       
             f.write(str(vocab) + "\n")                                                                           
             f.write(str(merges) + "\n")  
     
