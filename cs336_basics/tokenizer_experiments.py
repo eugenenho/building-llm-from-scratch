@@ -2,24 +2,21 @@ from cs336_basics.tokenizer import Tokenizer
 from cs336_basics.train_bpe import load_chunks, find_chunk_boundaries
 import regex as re
 import time
+import numpy as np
 
-if __name__ == "__main__":
 
-
-    # TinyStories
-    
-    # Load TinyStories vocab and merges
-        
+def tiny_story_experiment():
+    # TinyStories  
     ts_vocab_path = "tinystories_train_output/vocab.json"
     ts_merges_path = "tinystories_train_output/merges.txt"
     ts_special_tokens = ["<|endoftext|>",]
-    ts_iterable_path = "data/TinyStoriesV2-GPT4-train.txt"
+    ts_data_path = "data/TinyStoriesV2-GPT4-train.txt"
     special_tokens=["<|endoftext|>"]
     doc_split_pattern = "|".join(re.escape(token) for token in special_tokens)
     
     tokenizer = Tokenizer.from_files(vocab_filepath = ts_vocab_path, merges_filepath = ts_merges_path, special_tokens = ts_special_tokens)
     
-    chunks = load_chunks(ts_iterable_path, 10) # chunks: list of strings
+    chunks = load_chunks(ts_data_path, 10) # chunks: list of strings
     docs = re.split(doc_split_pattern, chunks[0]) # list of strings
 
     text_bytes = 0
@@ -48,9 +45,69 @@ if __name__ == "__main__":
     comp_ratio = text_bytes / len_tok_ids
     print(f"Compression ratio of Tiny Stories BPE tokenizer: {comp_ratio}")
 
+
+def encoding_tinystories():
+    # TinyStories  
+    ts_vocab_path = "tinystories_train_output/vocab.json"
+    ts_merges_path = "tinystories_train_output/merges.txt"
+    ts_special_tokens = ["<|endoftext|>",]
+    ts_data_path_train = "data/TinyStoriesV2-GPT4-train.txt"
+    ts_data_path_valid = "data/TinyStoriesV2-GPT4-valid.txt"
+    special_tokens=["<|endoftext|>"]
+    ts_output_path_train = "data/TinyStoriesV2-GPT4-train-encoded.npy"
+    ts_output_path_valid = "data/TinyStoriesV2-GPT4-valid-encoded.npy"
+    doc_split_pattern = "|".join(re.escape(token) for token in special_tokens)
+    
+    tokenizer = Tokenizer.from_files(vocab_filepath = ts_vocab_path, merges_filepath = ts_merges_path, special_tokens = ts_special_tokens)
+    
+
+    # Validation dataset 
+    t1 = time.time()
+    with open(ts_data_path_valid, "r") as fv:
+        ts_valid_tok_ids = list(tokenizer.encode_iterable(fv))
+    
+    ts_valid_tok_ids_np = np.array(ts_valid_tok_ids, dtype = np.uint16)
+    np.save(ts_output_path_valid, ts_valid_tok_ids_np)
+    t2 = time.time()
+    print(f"Validation set encoded and saved. Time taken: {t2 - t1:.3f}s")
+
+    # Sanity check : passed
+    # print("\n\n\n")
+    # arr = np.load("data/TinyStoriesV2-GPT4-valid-encoded.npy")
+    # print(arr.shape, arr.dtype, arr[:20])
+    # print(f"decoded content: {tokenizer.decode(arr.tolist())}")
+
+    # Training dataset 
+    t3 = time.time()
+    with open(ts_data_path_train, "r") as ft:
+        ts_train_tok_ids = list(tokenizer.encode_iterable(ft))
+    
+    ts_train_tok_ids_np = np.array(ts_train_tok_ids, dtype = np.uint16)
+    np.save(ts_output_path_train, ts_train_tok_ids_np)
+    t4 = time.time()
+    print(f"Validation set encoded and saved. Time taken: {t4 - t3:.3f}s")
+
+if __name__ == "__main__":
+#    tiny_story_experiment()
+  
+   encoding_tinystories()
+
+
+
+
  
+
+
+
+
+
+
+
+
+
+
  
-    # with open(ts_iterable_path, "r") as f:
+    # with open(ts_data_path, "r") as f:
     #     for token_id in tokenizer.encode_iterable(iterable = f):
     #         print(token_id)
 

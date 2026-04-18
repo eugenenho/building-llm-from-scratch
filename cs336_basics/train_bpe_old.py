@@ -8,23 +8,11 @@ import gc
 import json
 import cProfile
 import pstats
-import heapq
 from typing import BinaryIO
 from collections import Counter
 from collections import defaultdict  
 from multiprocessing import Pool
 from functools import partial
-
-class HeapCompare:
-    def __init__(self, value):
-        self.value = value
-    
-    def __lt__(self, other):
-        # returning True tells the function caller that self is "less than" other
-        return self.value > other.value
-
-    def __eq__(self, other):
-        return self.value == other.value
 
 # chunking
 def find_chunk_boundaries(
@@ -137,8 +125,7 @@ def train_bpe_function(
 
     # get pair_freq counts
     pair_freq=defaultdict(int)
-    pair_loc=defaultdict(set)   # dict[pair: set[word, word, ...]]
-    pair_freq_heap=[]           # Heapq for making max oepration efficient. O(n)->O(log n). initialize as list, use heapq ops
+    pair_loc=defaultdict(set) # dict[pair: set[word, word, ...]]
     for word, count in counts.items():
         if len(word) < 2: 
             continue
@@ -146,22 +133,15 @@ def train_bpe_function(
             pair_freq[pair] += count
             pair_loc[pair].add(word)
 
-    # initializing pair_freq_heap
-    pair_freq_heap = []
-    for pair, count in pair_freq.items():
-        # negative_pair_rep = (tuple(-b for b in pair[0]), tuple(-b for b in pair[1]))
-        pair_freq_heap.append((-count, (HeapCompare(pair[0]), HeapCompare(pair[1])), pair))
-    heapq.heapify(pair_freq_heap)        
-        
     t2 = time.time()
     
     # Run a while loop
     while (vocab_effective_size < vocab_size):
         
         # DEBUGGING CODE
-        if vocab_effective_size % 1000 == 0: 
+        if vocab_effective_size % 100 == 0: 
             mem_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024 / 1024  # macOS reports in bytes
-            print(f"while loop did another 1000! vocab: {vocab_effective_size}, pair_freq: {len(pair_freq)}, pair_loc: {len(pair_loc)}, merge: {len(merges)}, memory: {mem_mb}")
+            print(f"while loop did another 100! vocab: {vocab_effective_size}, pair_freq: {len(pair_freq)}, pair_loc: {len(pair_loc)}, merge: {len(merges)}, memory: {mem_mb}")
             sys.stdout.flush()
            
 
@@ -169,31 +149,18 @@ def train_bpe_function(
         if not pair_freq: 
             print("while exit reason: no more pair_freq")
             break                 # Exit condition: no more pairs available
-
-        if not pair_freq_heap:
-            print("while exit reason: no more pair_freq_heap")
-            break                 # Exit condition: no more pair freq heaps available
         
         merge_start = time.time()
-        # top_pair = max(pair_freq.items(), key=lambda x: (x[1], x[0])).  # NAIVE METHOD
-        
-        # New max method using heap
-        while True:
-            if not pair_freq_heap: break
-            (check_neg_count, _, check_pair) = heapq.heappop(pair_freq_heap)     # tuple. ( -count, negative of int representation of bytes in pairs, pair)
-            if pair_freq.get(check_pair) == -check_neg_count: 
-                top_pair = (check_pair, -check_neg_count)
-                break
-            
+        top_pair = max(pair_freq.items(), key=lambda x: (x[1], x[0]))
         max_time = time.time() - merge_start
         if max_time > 0.1:
-            # print(f"SLOW max at merge {len(merges)}: {max_time:.2f}s, pair_freq size: {len(pair_freq)}")
+            print(f"SLOW max at merge {len(merges)}: {max_time:.2f}s, pair_freq size: {len(pair_freq)}")
             sys.stdout.flush()
     
         
         loc_size = len(pair_loc[top_pair[0]])
         if loc_size > 1000:
-            # print(f"LARGE merge {len(merges)}: pair_loc size: {loc_size}, pair: {top_pair}")
+            print(f"LARGE merge {len(merges)}: pair_loc size: {loc_size}, pair: {top_pair}")
             sys.stdout.flush()
 
 
@@ -254,27 +221,14 @@ def train_bpe_function(
 
             for old_pair in old_pairs:
                 pair_freq[old_pair] -= count
-                if pair_freq[old_pair] <= 0:        # if this pair has no occurnece, then remove
+                if pair_freq[old_pair] <= 0:
                     pair_freq.pop(old_pair)
-                else:                               # otherwise, update heap
-                    # negative_pair_rep = (tuple(-b for b in old_pair[0]), tuple(-b for b in old_pair[1]))
-                    heapq.heappush(pair_freq_heap, (-pair_freq.get(old_pair), (HeapCompare(old_pair[0]), HeapCompare(old_pair[1])), old_pair))
-                    
-
-                                
                 pair_loc[old_pair].discard(word)
                 if not pair_loc[old_pair]: pair_loc.pop(old_pair) 
             
             for new_pair in new_pairs:
                 pair_freq[new_pair] += count
-                
-                # negative_pair_rep = (tuple(-b for b in new_pair[0]), tuple(-b for b in new_pair[1]))
-                heapq.heappush(pair_freq_heap, (-pair_freq.get(new_pair), (HeapCompare(new_pair[0]), HeapCompare(new_pair[1])), new_pair))
-
                 pair_loc[new_pair].add(segment)
-
-
-            
   
         # update counts dict
         for word_tuple in words_to_change:
@@ -282,7 +236,7 @@ def train_bpe_function(
 
         merge_time = time.time() - merge_start
         if merge_time > 0.1:
-            # print(f"SLOW merge {len(merges)-1}: {merge_time:.2f}s, pair_loc size: {loc_size}, updated words: {words_to_change}")
+            print(f"SLOW merge {len(merges)-1}: {merge_time:.2f}s, pair_loc size: {loc_size}, updated words: {words_to_change}")
             sys.stdout.flush()
         
                 
@@ -291,7 +245,6 @@ def train_bpe_function(
     print(f"vocab_size: {vocab_effective_size}")
     print(f"pre-tok time: {t2 - t1:.3f}s")
     print(f"merge time: {t3 - t2:.3f}s")
-    
     
     return vocab, merges
             
@@ -311,14 +264,14 @@ if __name__ == "__main__":
         print("starting")
         profiler = cProfile.Profile()
         profiler.enable()
-        
+         
         # file_path = "data/TinyStoriesV2-GPT4-valid.txt"
         # file_path = "data/TinyStoriesV2-GPT4-train.txt"
         # folder_path = "outputs_tinystories_2/"
         # VOCAB_SIZE=10000
         
-        # file_path = "data/owt_valid.txt"
-        file_path = "data/owt_train.txt"
+        file_path = "data/owt_valid.txt"
+        # file_path = "data/owt_train.txt"
         folder_path = "outputs_owt/"
         VOCAB_SIZE=32000
         
