@@ -83,20 +83,28 @@ def load_chunks(file_path: str, num_processes = int):
 
         # The following is a serial implementation, but you can parallelize this
         # by sending each start/end pair to a set of processes.
-        chunks = []
-        for start, end in zip(boundaries[:-1], boundaries[1:]):
-            f.seek(start)
-            chunk = f.read(end - start).decode("utf-8", errors="ignore")
-            chunks.append(chunk)
-        return chunks
+
+        return [(file_path, start, end) for start, end in zip(boundaries[:-1], boundaries[1:])]
+        
+        # chunks = []
+        # for start, end in zip(boundaries[:-1], boundaries[1:]):
+
+        #     f.seek(start)
+        #     chunk = f.read(end - start).decode("utf-8", errors="ignore")
+        #     chunks.append(chunk)
+        # return chunks
             
 # Pre-tokenization
 
-def pre_tokenize(chunk: str, doc_split_pattern: str, pretok_pattern: str):
-    docs = re.split(doc_split_pattern, chunk) # list of strings
-    pretok_chunk = [match.group() for doc in docs for match in re.finditer(pretok_pattern, doc)] # list of strings
-    return Counter(pretok_chunk)
+def pre_tokenize(chunk_info, doc_split_pattern: str, pretok_pattern: str):
+    (file_path, start, end) = chunk_info
+    with open(file_path, "rb") as f:
+        f.seek(start)
+        chunk = f.read(end - start).decode("utf-8", errors="ignore")
 
+    docs = re.split(doc_split_pattern, chunk) # list of strings
+    pretok_chunk = (match.group() for doc in docs for match in re.finditer(pretok_pattern, doc)) # generator
+    return Counter(pretok_chunk)
     
 
 # Train BPE function
@@ -115,21 +123,24 @@ def train_bpe_function(
         vocab_effective_size += 1 
     merges = []
     min_frequency = 2
-    N = 4               # parallel processing
+    N_CHUNKS = 128               # parallel processing
+    N_WORKERS = os.cpu_count()
     PRETOK_PATTERN = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
     doc_split_pattern = "|".join(re.escape(token) for token in special_tokens)
     
     # Open file, and get chunks back
-    chunks = load_chunks(input_path, N) # chunks: list of strings
+    chunks_info = load_chunks(input_path, N_CHUNKS) # chunks: list of tuples [(file_path, start, end),...]
     print("chunks returned!")
     
     # Pretokenize, parallel
     t1= time.time()
-    with Pool(processes = N) as pool:
-        naive_counters = pool.map(partial(pre_tokenize, doc_split_pattern = doc_split_pattern, pretok_pattern = PRETOK_PATTERN), chunks) #list of Counters
-    naive_counters_sum = sum(naive_counters, Counter())
-    counts = {tuple(bytes([b]) for b in item.encode("utf-8")): count for item, count in naive_counters_sum.items()} # dict[tuple(bytes,...), int]
-    del chunks, naive_counters, naive_counters_sum
+    naive_counters = Counter()
+    with Pool(processes = N_WORKERS) as pool:
+        for result in pool.imap_unordered(partial(pre_tokenize, doc_split_pattern = doc_split_pattern, pretok_pattern = PRETOK_PATTERN), chunks_info): #list of Counters
+            naive_counters += result
+    # naive_counters_sum = sum(naive_counters, Counter())
+    counts = {tuple(bytes([b]) for b in item.encode("utf-8")): count for item, count in naive_counters.items()} # dict[tuple(bytes,...), int]
+    del naive_counters
     gc.collect()
     
     print(f"pretokenized! counts size: {len(counts)}")
@@ -149,20 +160,23 @@ def train_bpe_function(
     # initializing pair_freq_heap
     pair_freq_heap = []
     for pair, count in pair_freq.items():
-        # negative_pair_rep = (tuple(-b for b in pair[0]), tuple(-b for b in pair[1]))
+        
         pair_freq_heap.append((-count, (HeapCompare(pair[0]), HeapCompare(pair[1])), pair))
     heapq.heapify(pair_freq_heap)        
         
     t2 = time.time()
+    t_loop_old = time.time()
     
     # Run a while loop
     while (vocab_effective_size < vocab_size):
         
         # DEBUGGING CODE
-        if vocab_effective_size % 1000 == 0: 
+        if vocab_effective_size % 100 == 0: 
             mem_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024 / 1024  # macOS reports in bytes
-            print(f"while loop did another 1000! vocab: {vocab_effective_size}, pair_freq: {len(pair_freq)}, pair_loc: {len(pair_loc)}, merge: {len(merges)}, memory: {mem_mb}")
+            t_loop_new = time.time()
+            print(f"while loop did another 100! vocab: {vocab_effective_size}, pair_freq: {len(pair_freq)}, pair_loc: {len(pair_loc)}, merge: {len(merges)}, memory: {mem_mb}, time: {t_loop_new - t_loop_old:.3f}s")
             sys.stdout.flush()
+            t_loop_old = t_loop_new
            
 
         # find top pair 
@@ -192,8 +206,8 @@ def train_bpe_function(
     
         
         loc_size = len(pair_loc[top_pair[0]])
-        if loc_size > 1000:
-            # print(f"LARGE merge {len(merges)}: pair_loc size: {loc_size}, pair: {top_pair}")
+        if loc_size > 50000:
+            print(f"LARGE merge {len(merges)}: pair_loc size: {loc_size}, pair: {top_pair}")
             sys.stdout.flush()
 
 
@@ -281,10 +295,18 @@ def train_bpe_function(
             counts[word_tuple[0]] = counts.pop(word_tuple[1]) # update counts dict
 
         merge_time = time.time() - merge_start
-        if merge_time > 0.1:
+        if merge_time > 30:
             # print(f"SLOW merge {len(merges)-1}: {merge_time:.2f}s, pair_loc size: {loc_size}, updated words: {words_to_change}")
+            print(f"SLOW merge {len(merges)-1}: {merge_time:.2f}s, pair_loc size: {loc_size}, pair: {top_pair}")
             sys.stdout.flush()
-        
+
+        if len(merges) > 0 and len(merges) % 1000 == 0:
+            print(f"pair_freq_heap refresh: merge #: {len(merges)}: before size: {len(pair_freq_heap)}, after size: {len(pair_freq)}")
+            pair_freq_heap = []
+            for pair, count in pair_freq.items():
+                pair_freq_heap.append((-count, (HeapCompare(pair[0]), HeapCompare(pair[1])), pair))
+            heapq.heapify(pair_freq_heap)        
+            
                 
     t3 = time.time()
 
