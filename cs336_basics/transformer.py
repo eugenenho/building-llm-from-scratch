@@ -156,7 +156,92 @@ def scaled_dot_product_attention(
     qk = einsum(Q, K, "batch_size ... seq_len_q d_k, batch_size ... seq_len_k d_k -> batch_size ... seq_len_q seq_len_k") * d_k**(-0.5)
     
     masked_qk = qk.masked_fill(~mask, float('-inf')) # if mask is True, this value should stay. if mask is False, this should be 0 after softmax, i.e. -inf now
-    
-
     softmax_qk = softmax(masked_qk, target_dim = -1)
     return einsum(softmax_qk, V, "batch_size ... seq_len_q seq_len_k, batch_size ... seq_len_k d_v -> batch_size ... seq_len_q d_v")
+
+class multihead_self_attention(nn.Module):
+    def __init__(self, d_model: int, num_heads: int, max_seq_len: int | None = None, theta: float | None = None,):
+        super().__init__()
+        
+        # Initialization
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_k = int(d_model / num_heads)
+        assert d_model % num_heads == 0
+        self.d_v = self.d_k
+        self.max_seq_len = max_seq_len
+        self.theta = theta
+        
+        std = (2 / (num_heads * self.d_k + d_model))**0.5
+        self.w_q = nn.Parameter(
+            torch.nn.init.trunc_normal_(
+                torch.empty(num_heads * self.d_k, d_model), mean = 0, std = std, a = -3*std, b = 3*std
+            )
+        )
+        self.w_k = nn.Parameter(
+            torch.nn.init.trunc_normal_(
+                torch.empty(num_heads * self.d_k, d_model), mean = 0, std = std, a = -3*std, b = 3*std
+            )
+        )
+        self.w_v = nn.Parameter(
+            torch.nn.init.trunc_normal_(
+                torch.empty(num_heads * self.d_v, d_model), mean = 0, std = std, a = -3*std, b = 3*std
+            )
+        )
+        self.w_o = nn.Parameter(
+            torch.nn.init.trunc_normal_(
+                torch.empty(d_model, num_heads * self.d_v), mean = 0, std = std, a = -3*std, b = 3*std
+            )
+        )
+        
+    def forward(self, x: Float[Tensor, "... seq_len d_model"], token_positions: Int[Tensor, " ... sequence_length"] | None = None,)-> Float[Tensor, "... seq_len d_model"]:
+        
+        # Combine into one large matrix so Q, K, V can be calculated with one mat mul
+        print(f"\n\n x shape:{x.shape}")
+        print(f"self.w_q shape: {self.w_q.shape}")
+        w_qkv = torch.cat([self.w_q, self.w_k, self.w_v], dim = 0)                          # (3 * num_heads * self.d_k, d_model)
+        print(f"wqkv shape: {w_qkv.shape}")
+        matmulresult = einsum(x, w_qkv, "... d_model, three_dim d_model -> ... three_dim")  # where three_dim = 3 * num_heads * self.d_k
+        print(f"matmulresult shape: {matmulresult.shape}")
+        Q, K, V = torch.chunk(matmulresult, 3, dim=-1)
+        print(f"Q, K, V shape: {Q.shape}, {K.shape}, {V.shape}")
+                
+        seq_len = x.shape[-2]
+        
+        
+        # if not self.theta: self.theta = 10000
+        # if not self.max_seq_len: self.max_seq_len = seq_len
+        # if not token_positions: self.token_positions = torch.arange(seq_len)
+        
+        Q = rearrange(Q, "... seq_len (num_heads d_k) -> ... seq_len num_heads d_k", num_heads = self.num_heads, d_k = self.d_k)
+        Q = rearrange(Q, "... seq_len num_heads d_k -> ... num_heads seq_len d_k", num_heads = self.num_heads, d_k = self.d_k)
+        K = rearrange(K, "... seq_len (num_heads d_k) -> ... seq_len num_heads d_k", num_heads = self.num_heads, d_k = self.d_k)
+        K = rearrange(K, "... seq_len num_heads d_k -> ... num_heads seq_len d_k", num_heads = self.num_heads, d_k = self.d_k)
+        V = rearrange(V, "... seq_len (num_heads d_v) -> ... seq_len num_heads d_v", num_heads = self.num_heads, d_v = self.d_v)
+        V = rearrange(V, "... seq_len num_heads d_v -> ... num_heads seq_len d_v", num_heads = self.num_heads, d_v = self.d_v)
+        
+        if self.theta is not None:
+            run_rope = rope(theta = self.theta, d_k = self.d_k, max_seq_len = self.max_seq_len)    
+            if token_positions is None: token_positions = torch.arange(seq_len)
+            Q = run_rope(Q, token_positions)
+            K = run_rope(K, token_positions)
+        
+
+        print(f"After rearrange, Q, K, V shape: {Q.shape}, {K.shape}, {V.shape}")
+        mask = torch.ones(seq_len, seq_len).tril().bool()   # (seq_len, seq_len) matrix. True at the bottom triangle. True indicating, signal passing
+        attention = scaled_dot_product_attention(Q, K, V, mask) # "... num_heads seq_len d_v"
+        print(f"attention shape: {attention.shape}")
+        attention = rearrange(attention, "... num_heads seq_len d_v -> ... seq_len num_heads d_v")
+        attention = rearrange(attention, "... seq_len num_heads d_v -> ... seq_len (num_heads d_v)")
+        print(f"AFter rearange, attention shape: {attention.shape}")
+        result = einsum(attention, self.w_o, "... seq_len num_heads_d_v, d_model num_heads_d_v -> ... seq_len d_model")
+        print(f"result shape: {result.shape}")
+        return result
+
+
+        
+
+
+        
+        
+        
