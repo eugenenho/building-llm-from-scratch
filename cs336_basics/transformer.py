@@ -259,5 +259,54 @@ class transformer_block(nn.Module):
         return x
 
 
+class transformer_lm(nn.Module):
+    def __init__(
+            self, 
+            d_model: int, 
+            num_heads: int, 
+            d_ff: int, 
+            context_length: int, 
+            rope_theta: float, 
+            vocab_size: int, 
+            num_layers: int
+    ):
+        super().__init__()
+
+        # Create vocab embedding
+        self.token_embedding = embedding(num_embeddings = vocab_size, embedding_dim = d_model)
+        
+        # Create transformer blocks
+        self.blocks = nn.ModuleList([
+            transformer_block(d_model = d_model, num_heads = num_heads, d_ff = d_ff, max_seq_len = context_length, theta = rope_theta) for _ in range(num_layers)
+        ])
+            
+        # Create final norm
+        self.final_norm = rmsnorm(d_model = d_model)
+
+        # Create LM Head
+        self.lm_head = linear(in_features = d_model, out_features = vocab_size)
+
+    def forward(self, x: Int[Tensor, "batch_size ... seq_len"]) -> Float[Tensor, "batch_size ... seq_len vocab_size"]:
+        
+        # get token embeddings
+        x = self.token_embedding(x) # (batch_size, seq_len, d_model)
+        
+        # transformer blocks
+        for block in self.blocks:
+            x = block(x)
+
+        # final norm layer
+        x = self.final_norm(x)  # (batch_size, ... , seq_len, d_model)
+
+        # LM Head
+        logits = self.lm_head(x)     # (batch_size, ... , seq_len, vocab_size)
+
+        return logits 
+
+            
+
+        
+        
+
         
         
