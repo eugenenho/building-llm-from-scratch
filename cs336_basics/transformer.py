@@ -197,14 +197,14 @@ class multihead_self_attention(nn.Module):
     def forward(self, x: Float[Tensor, "... seq_len d_model"], token_positions: Int[Tensor, " ... sequence_length"] | None = None,)-> Float[Tensor, "... seq_len d_model"]:
         
         # Combine into one large matrix so Q, K, V can be calculated with one mat mul
-        print(f"\n\n x shape:{x.shape}")
-        print(f"self.w_q shape: {self.w_q.shape}")
+        # print(f"\n\n x shape:{x.shape}")
+        # print(f"self.w_q shape: {self.w_q.shape}")
         w_qkv = torch.cat([self.w_q, self.w_k, self.w_v], dim = 0)                          # (3 * num_heads * self.d_k, d_model)
-        print(f"wqkv shape: {w_qkv.shape}")
+        # print(f"wqkv shape: {w_qkv.shape}")
         matmulresult = einsum(x, w_qkv, "... d_model, three_dim d_model -> ... three_dim")  # where three_dim = 3 * num_heads * self.d_k
-        print(f"matmulresult shape: {matmulresult.shape}")
+        # print(f"matmulresult shape: {matmulresult.shape}")
         Q, K, V = torch.chunk(matmulresult, 3, dim=-1)
-        print(f"Q, K, V shape: {Q.shape}, {K.shape}, {V.shape}")
+        # print(f"Q, K, V shape: {Q.shape}, {K.shape}, {V.shape}")
                 
         seq_len = x.shape[-2]
         
@@ -227,21 +227,37 @@ class multihead_self_attention(nn.Module):
             K = run_rope(K, token_positions)
         
 
-        print(f"After rearrange, Q, K, V shape: {Q.shape}, {K.shape}, {V.shape}")
+        # print(f"After rearrange, Q, K, V shape: {Q.shape}, {K.shape}, {V.shape}")
         mask = torch.ones(seq_len, seq_len).tril().bool()   # (seq_len, seq_len) matrix. True at the bottom triangle. True indicating, signal passing
         attention = scaled_dot_product_attention(Q, K, V, mask) # "... num_heads seq_len d_v"
-        print(f"attention shape: {attention.shape}")
+        # print(f"attention shape: {attention.shape}")
         attention = rearrange(attention, "... num_heads seq_len d_v -> ... seq_len num_heads d_v")
         attention = rearrange(attention, "... seq_len num_heads d_v -> ... seq_len (num_heads d_v)")
-        print(f"AFter rearange, attention shape: {attention.shape}")
+        # print(f"AFter rearange, attention shape: {attention.shape}")
         result = einsum(attention, self.w_o, "... seq_len num_heads_d_v, d_model num_heads_d_v -> ... seq_len d_model")
-        print(f"result shape: {result.shape}")
+        # print(f"result shape: {result.shape}")
         return result
 
 
+class transformer_block(nn.Module):
+    def __init__(self, d_model: int, num_heads: int, d_ff: int, max_seq_len: int, theta: float):
+        super().__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+
+        # Create MHA and FFN objects
+        self.rmsnorm1 = rmsnorm(d_model = d_model)
+        self.mha = multihead_self_attention(d_model = d_model, num_heads = num_heads, max_seq_len = max_seq_len, theta = theta)
+        self.rmsnorm2 = rmsnorm(d_model = d_model)
+        self.ffn = positionwise_feedforward(d_model = d_model, d_ff = d_ff)
+    
+    def forward(self, x: Float[Tensor, "batch_size ... seq_len d_model"]) -> Float[Tensor, "batch_size ... seq_len d_model"]:
         
+        x = x + self.mha(self.rmsnorm1(x))
+        x = x + self.ffn(self.rmsnorm2(x))
+        return x
 
 
-        
         
         
