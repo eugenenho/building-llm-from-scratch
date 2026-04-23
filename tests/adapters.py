@@ -674,4 +674,4 @@ def run_train_bpe(
         vocab_size=vocab_size,
         special_tokens=special_tokens
     )
-    raise NotImplementedError
+    
