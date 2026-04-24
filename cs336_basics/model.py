@@ -88,9 +88,9 @@ class positionwise_feedforward(nn.Module):
 
     def forward(self, x: Float[Tensor, "... d_model"]) -> Float[Tensor, "... d_model"]:
         x_w1 = einsum(x, self.w1, "... d_model, d_ff d_model -> ... d_ff")
-        sigmoid_x_w1 = einsum(x_w1, torch.sigmoid(x_w1), "... d_ff, ... d_ff -> ... d_ff")
+        silu = einsum(x_w1, torch.sigmoid(x_w1), "... d_ff, ... d_ff -> ... d_ff")
         x_w3 = einsum(x, self.w3, "... d_model, d_ff d_model -> ... d_ff")
-        swiglu = einsum(sigmoid_x_w1, x_w3, "... d_ff, ... d_ff -> ... d_ff")
+        swiglu = einsum(silu, x_w3, "... d_ff, ... d_ff -> ... d_ff")
         return einsum(swiglu, self.w2, "... d_ff, d_model d_ff -> ... d_model")
 
 class rope(nn.Module):
