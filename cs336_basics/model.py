@@ -273,6 +273,8 @@ class transformer_lm(nn.Module):
     ):
         super().__init__()
 
+        self.context_length = context_length
+
         # Create vocab embedding
         self.token_embedding = embedding(num_embeddings = vocab_size, embedding_dim = d_model)
         

@@ -169,7 +169,7 @@ cython_debug/
 checkpoints/
 
 # Wandb run logs
- wandb/
+wandb/
 
 # Profiling artifacts
 *.prof
