@@ -164,3 +164,15 @@ cython_debug/
 
 .ruff_cache/
 *.zip
+
+# Model checkpoints (large binaries)
+checkpoints/
+
+# Wandb run logs
+ wandb/
+
+# Profiling artifacts
+*.prof
+
+# macOS metadata
+.DS_Store

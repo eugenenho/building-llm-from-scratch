@@ -136,6 +136,10 @@ if __name__ == "__main__":
 
     # PART 3: ALL OTHER SET UP
     
+    ## DEBUGGING ##
+    # for k, v in hparams.items():
+    #     print(f"{k}: {v}  - dtype: {type(v)}")
+
     # Checkpointing set up
     run_dir = Path(hparams["output_dir"]) / hparams["run_name"]
     run_dir.mkdir(parents = True, exist_ok = True)

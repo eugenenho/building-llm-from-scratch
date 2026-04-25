@@ -68,7 +68,7 @@ class positionwise_feedforward(nn.Module):
         else:
             self.d_ff = d_ff
         
-        print(f"dff: {self.d_ff}")
+        
         std = (2 / (self.d_ff + self.d_model))**0.5
         self.w1 = nn.Parameter(         # (d_ff, d_model)
             torch.nn.init.trunc_normal_(
@@ -115,8 +115,8 @@ class rope(nn.Module):
         matrix_ik = einsum(i, k, "i_dim, k_dim -> i_dim k_dim")
         matrix_sin = torch.sin(matrix_ik)
         matrix_cos = torch.cos(matrix_ik)
-        print(f"matrix_ik_sin shape: {matrix_sin.shape}")
-        print(f"matrix_ik_cos shape: {matrix_cos.shape}")
+        # print(f"matrix_ik_sin shape: {matrix_sin.shape}")
+        # print(f"matrix_ik_cos shape: {matrix_cos.shape}")
         
         self.register_buffer("matrix_sin", matrix_sin, persistent=False)
         self.register_buffer("matrix_cos", matrix_cos, persistent=False)
@@ -135,7 +135,7 @@ class rope(nn.Module):
         x_new = torch.stack([a_new, b_new], dim = -1)
         x_new = rearrange(x_new, "... seq_len d_k_half two -> ... seq_len (d_k_half two)", d_k_half = self.d_k//2, two = 2)
 
-        assert x.shape == x_new.shape
+        # assert x.shape == x_new.shape
         return x_new
 
 def softmax(x: Float[Tensor, "..."], target_dim=int):
@@ -193,6 +193,8 @@ class multihead_self_attention(nn.Module):
                 torch.empty(d_model, num_heads * self.d_v), mean = 0, std = std, a = -3*std, b = 3*std
             )
         )
+        if self.theta is not None:
+            self.rope = rope(theta = self.theta, d_k = self.d_k, max_seq_len = self.max_seq_len)
         
     def forward(self, x: Float[Tensor, "... seq_len d_model"], token_positions: Int[Tensor, " ... sequence_length"] | None = None,)-> Float[Tensor, "... seq_len d_model"]:
         
@@ -221,14 +223,13 @@ class multihead_self_attention(nn.Module):
         V = rearrange(V, "... seq_len num_heads d_v -> ... num_heads seq_len d_v", num_heads = self.num_heads, d_v = self.d_v)
         
         if self.theta is not None:
-            run_rope = rope(theta = self.theta, d_k = self.d_k, max_seq_len = self.max_seq_len)    
-            if token_positions is None: token_positions = torch.arange(seq_len)
-            Q = run_rope(Q, token_positions)
-            K = run_rope(K, token_positions)
+            if token_positions is None: token_positions = torch.arange(seq_len, device = Q.device)
+            Q = self.rope(Q, token_positions)
+            K = self.rope(K, token_positions)
         
 
         # print(f"After rearrange, Q, K, V shape: {Q.shape}, {K.shape}, {V.shape}")
-        mask = torch.ones(seq_len, seq_len).tril().bool()   # (seq_len, seq_len) matrix. True at the bottom triangle. True indicating, signal passing
+        mask = torch.ones(seq_len, seq_len, device = Q.device).tril().bool()   # (seq_len, seq_len) matrix. True at the bottom triangle. True indicating, signal passing
         attention = scaled_dot_product_attention(Q, K, V, mask) # "... num_heads seq_len d_v"
         # print(f"attention shape: {attention.shape}")
         attention = rearrange(attention, "... num_heads seq_len d_v -> ... seq_len num_heads d_v")
