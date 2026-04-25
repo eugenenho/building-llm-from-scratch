@@ -8,6 +8,7 @@ import yaml
 from datetime import datetime
 import numpy as np
 from pathlib import Path
+import wandb
 
 
 if __name__ == "__main__":
@@ -16,31 +17,32 @@ if __name__ == "__main__":
     """ 
     Full set of hyperparameters needed for training:(example)
         model:
-            batch_size: 32
             context_length: 256
             d_model: 512
+            vocab_size: null
             num_layers: 4
             num_heads: 16 
             rope_theta: 10000
             d_ff: 1344
 
         training:
-            device: 
+            batch_size: 32
             steps: 5000
-            warmup_tiers: 250
+            warmup_iters: 250
             cosine_cycle_iters: 5000
-            max_lr: 1e-3
-            min_lr: 1e-4
+            lr_max: 1e-3
+            lr_min: 1e-4
             weight_decay: 0.01
             betas:
                 - 0.9
                 - 0.95
-            max_grad_norm: 1.0
+            adamw_eps: 1e-8
+            max_l2_norm: 1.0
 
         data:
             train_data_path: data/TinyStoriesV2-GPT4-train-encoded.npy
             valid_data_path: data/TinyStoriesV2-GPT4-valid-encoded.npy
-        
+
         tokenizer:
             vocab_path: outputs_tinystories/vocab.json
             merges_path: outputs_tinystories/merges.txt 
@@ -49,7 +51,7 @@ if __name__ == "__main__":
         checkpoint:
             output_dir: checkpoints/tinystories
             run_name: null
-            save_every: 1000        
+            save_every: 1000
     
     """
         
@@ -63,7 +65,7 @@ if __name__ == "__main__":
     hparams = {k:v for _, group in nested_hparams.items() for k, v in group.items()}
     
     # Step 2: Check for overrides from CLI
-    list_args = ["run_name", "lr_max", "lr_min", "steps", "batch_size", "context_length", "config"]
+    list_args = ["run_name", "lr_max", "lr_min", "steps", "batch_size", "context_length"]
     parser.add_argument("--run-name", default=argparse.SUPPRESS, type=str, help="name of the run")
     parser.add_argument("--lr-max", default=argparse.SUPPRESS, type=float, help="max learning rate for the lr scheduler")
     parser.add_argument("--lr-min", default=argparse.SUPPRESS, type=float, help="min learning rate for the lr scheduler")
@@ -74,6 +76,8 @@ if __name__ == "__main__":
     cli_overrides = vars(args) # dict of only what the user passed on CLI, overriding YAML
 
     for k, v in cli_overrides.items():
+        if k == "config":
+            continue
         if k not in list_args:
             raise ValueError(f"non-acceptable flag: {k}")
         if k in hparams and hparams[k] != v:
@@ -124,15 +128,34 @@ if __name__ == "__main__":
     model.to(device)
     optimizer = AdamW(
         params = model.parameters(), 
-        lr = hparams["lr_max"], 
+        lr = 0, 
         betas = hparams["betas"], 
         weight_decay= hparams["weight_decay"], 
         eps = hparams["adamw_eps"]
     )
+
+    # PART 3: ALL OTHER SET UP
+    
+    # Checkpointing set up
     run_dir = Path(hparams["output_dir"]) / hparams["run_name"]
     run_dir.mkdir(parents = True, exist_ok = True)
     
-    # PART 3: LOAD DATA
+    # Dumping config in the run_dir
+    nested_hparams_for_dump = {
+        group_name: {k: hparams[k] for k in group.keys() if k in hparams}
+        for group_name, group in nested_hparams.items()
+    }
+    with open(run_dir / "config.yaml", "w") as f:
+        yaml.safe_dump(nested_hparams_for_dump, f, sort_keys=False)
+    
+    # Logging set up
+    wandb.init(
+      project="building-llm-from-scratch-1",        # groups runs in the dashboard
+      name=hparams["run_name"],                     # this run's name
+      config=hparams,                               # auto-logged as the run's config
+    )
+    
+    # Data loading
     dataset = np.load(hparams["train_data_path"], mmap_mode='r')
 
 
@@ -161,19 +184,26 @@ if __name__ == "__main__":
         # Forward, backward, step
         optimizer.zero_grad()
         logits = model(x = inputs)                                  # output: Float[Tensor, "batch_size ... seq_len vocab_size"]
-        loss = cross_entropy(logits = logits, targets = targets)    # int
+        loss = cross_entropy(logits = logits, targets = targets)    # torch
         loss.backward()
         gradient_clipping(model.parameters(), max_l2_norm=hparams["max_l2_norm"])
         optimizer.step()
 
         # Progress logging
+        wandb.log({"training_loss": loss.item(), "lr": lr}, step=t)
+        if (t + 1) % 100 == 0:
+            print(f"Step: {t}   Training loss: {loss.item()}    lr: {lr}")
 
         # Checkpointing
         if (t + 1) % hparams["save_every"] == 0:
             ckpt_path = run_dir / f"step_{t}.pt"
             save_checkpoint(model = model, optimizer = optimizer, iteration = t, out = ckpt_path)
 
+    final_path = run_dir / f"step_{t}_final.pt"
+    save_checkpoint(model = model, optimizer = optimizer, iteration = t, out = final_path)
+    wandb.finish()
+
         
+    # Validation loss
 
 
-        
