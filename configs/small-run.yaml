@@ -23,7 +23,7 @@ training:
 
 data:
   train_data_path: data/TinyStoriesV2-GPT4-train-encoded.npy
-  valid_data_path: data/TinyStoriesV2-GPT4-valid-encoded.npy
+  val_data_path: data/TinyStoriesV2-GPT4-valid-encoded.npy
 
 tokenizer:
   vocab_path: outputs_tinystories/vocab.json
@@ -34,6 +34,9 @@ checkpoint:
   output_dir: checkpoints/tinystories
   run_name: null
   save_every: 1000
+  eval_every: 100
+  val_iters: 50
+
   
 
   

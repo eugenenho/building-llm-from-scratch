@@ -9,7 +9,7 @@ from datetime import datetime
 import numpy as np
 from pathlib import Path
 import wandb
-
+import math
 
 if __name__ == "__main__":
     
@@ -97,6 +97,7 @@ if __name__ == "__main__":
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
         hparams["run_name"] = f"{timestamp}_lrmax{hparams['lr_max']:.0e}_bs{hparams['batch_size']}_steps{hparams['steps']}"
      
+    # Step 4: Compute and add hparams not in yaml originally
     tokenizer = Tokenizer.from_files(                   # for sampling, for vocab_size
         vocab_filepath = hparams["vocab_path"], 
         merges_filepath = hparams["merges_path"], 
@@ -160,7 +161,8 @@ if __name__ == "__main__":
     )
     
     # Data loading
-    dataset = np.load(hparams["train_data_path"], mmap_mode='r')
+    train_dataset = np.load(hparams["train_data_path"], mmap_mode='r')
+    val_dataset = np.load(hparams["val_data_path"], mmap_mode='r')
 
 
     # PART 4: TRAINING LOOP
@@ -168,7 +170,7 @@ if __name__ == "__main__":
         
         # Get data
         inputs, targets = data_loader(                               # tensors: (batch_size, context_length)
-            dataset = dataset, 
+            dataset = train_dataset, 
             batch_size=hparams["batch_size"], 
             context_length=hparams["context_length"], 
             device = device
@@ -195,19 +197,38 @@ if __name__ == "__main__":
 
         # Progress logging
         wandb.log({"training_loss": loss.item(), "lr": lr}, step=t)
-        if (t + 1) % 100 == 0:
-            print(f"Step: {t}   Training loss: {loss.item()}    lr: {lr}")
 
         # Checkpointing
         if (t + 1) % hparams["save_every"] == 0:
             ckpt_path = run_dir / f"step_{t}.pt"
             save_checkpoint(model = model, optimizer = optimizer, iteration = t, out = ckpt_path)
 
+        # Validation
+        if (t + 1) % hparams["eval_every"] == 0:
+            
+            model.eval()                    # turns off dropout, etc
+            with torch.no_grad():           # no autograd stuff, saves memory and time
+
+                val_losses = []                
+                for _ in range(hparams["val_iters"]):
+                    # Get data
+                    val_inputs, val_targets = data_loader(                               # tensors: (batch_size, context_length)
+                        dataset = val_dataset, 
+                        batch_size=hparams["batch_size"], 
+                        context_length=hparams["context_length"], 
+                        device = device
+                    ) 
+                    val_logits = model(x = val_inputs)
+                    val_losses.append(cross_entropy(logits = val_logits, targets = val_targets).item())
+                val_loss = sum(val_losses) / len(val_losses)
+                val_ppl = math.exp(val_loss)
+            model.train()
+            wandb.log({"val_loss": val_loss, "val_ppl": val_ppl}, step=t)
+            print(f"Step: {t}   Training loss: {loss.item()}    Validation loss: {val_loss}    Vallidation perplexity: {val_ppl}     lr: {lr}")
+            
+
     final_path = run_dir / f"step_{t}_final.pt"
     save_checkpoint(model = model, optimizer = optimizer, iteration = t, out = final_path)
     wandb.finish()
-
-        
-    # Validation loss
 
 
