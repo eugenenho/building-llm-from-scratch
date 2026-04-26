@@ -238,6 +238,7 @@ if __name__ == "__main__":
 
     final_path = run_dir / f"step_{t}_final.pt"
     save_checkpoint(model = model, optimizer = optimizer, iteration = t, out = final_path)
+    wandb.run.summary["diverged"] = False
     wandb.finish()
 
 
