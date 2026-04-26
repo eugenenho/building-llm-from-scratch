@@ -33,7 +33,7 @@ tokenizer:
 checkpoint:
   output_dir: checkpoints/tinystories
   run_name: null
-  save_every: 1000
+  save_every: 100000
   eval_every: 100
   val_iters: 50
 
