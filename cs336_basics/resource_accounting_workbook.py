@@ -111,7 +111,11 @@ class resource_account:
         max_batch_size = (memory_limit - fixed_bytes) / per_batch_bytes
         print(f"assuming total memory limit of 80GB, max batch size is: {max_batch_size}")
 
-        
+        # For H200
+        # Assuming 140 GB of memory, max batch size 
+        memory_limit = 150323855872
+        max_batch_size = (memory_limit - fixed_bytes) / per_batch_bytes
+        print(f"assuming total memory limit of 140GB, max batch size is: {max_batch_size}")
         
     def calc_flops_total(self):
         # Assuming backward pass takes 2x flops as forward pass
@@ -216,6 +220,15 @@ if __name__ == "__main__":
         d_ff = 4288
     ) 
    
+    ts_model = resource_account(
+        name = "tinystories_model",
+        vocab_size = 10000,
+        context_length	= 256,
+        num_layer = 4,
+        d_model = 512,
+        num_heads = 16,
+        d_ff = 1344
+    ) 
 
     gpt_2_small.calc_params()
     small_flops = gpt_2_small.calc_flops_forward()
@@ -287,3 +300,4 @@ if __name__ == "__main__":
     gpt_2_xl.calc_memory()
     gpt_2_xl.calc_flops_total()
 
+    ts_model.calc_memory()
