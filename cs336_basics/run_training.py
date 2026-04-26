@@ -60,7 +60,7 @@ if __name__ == "__main__":
     parser.add_argument("--config", type=str, required=True, help="config file path")
     known_args, _ = parser.parse_known_args()
     config_path = known_args.config
-    nested_hparams = yaml.safe_load(open(config_path))
+    nested_hparams = yaml.safe_load(open(config_path)) # dict
     hparams = {}
     hparams = {k:v for _, group in nested_hparams.items() for k, v in group.items()}
     
@@ -198,6 +198,14 @@ if __name__ == "__main__":
         # Progress logging
         wandb.log({"training_loss": loss.item(), "lr": lr}, step=t)
 
+        # Check for NaN or inf/-inf => if so, diverged. log and break
+        if not math.isfinite(loss.item()): 
+            print(f"DIVERGED at step {t}, loss={loss.item()}")
+            wandb.run.summary["diverged"] = True
+            wandb.run.summary["divergence_step"] = t
+            wandb.run.summary["lr_at_divergence"] = lr
+            break
+
         # Checkpointing
         if (t + 1) % hparams["save_every"] == 0:
             ckpt_path = run_dir / f"step_{t}.pt"
@@ -224,6 +232,7 @@ if __name__ == "__main__":
                 val_ppl = math.exp(val_loss)
             model.train()
             wandb.log({"val_loss": val_loss, "val_ppl": val_ppl}, step=t)
+        
             print(f"Step: {t}   Training loss: {loss.item()}    Validation loss: {val_loss}    Vallidation perplexity: {val_ppl}     lr: {lr}")
             
 
