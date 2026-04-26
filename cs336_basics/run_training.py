@@ -192,11 +192,11 @@ if __name__ == "__main__":
         logits = model(x = inputs)                                  # output: Float[Tensor, "batch_size ... seq_len vocab_size"]
         loss = cross_entropy(logits = logits, targets = targets)    # torch
         loss.backward()
-        gradient_clipping(model.parameters(), max_l2_norm=hparams["max_l2_norm"])
+        grad_norm = gradient_clipping(model.parameters(), max_l2_norm=hparams["max_l2_norm"])
         optimizer.step()
 
         # Progress logging
-        wandb.log({"training_loss": loss.item(), "lr": lr}, step=t)
+        wandb.log({"training_loss": loss.item(), "lr": lr, "grad_norm": grad_norm.item()}, step=t)
 
         # Check for NaN or inf/-inf => if so, diverged. log and break
         if not math.isfinite(loss.item()): 

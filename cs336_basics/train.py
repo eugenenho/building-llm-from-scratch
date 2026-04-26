@@ -113,6 +113,7 @@ def gradient_clipping(params, max_l2_norm):
         for p in params: 
             if p.grad is not None:
                 p.grad = p.grad * scaling_factor
+    return total_l2_norm
     
 def data_loader(dataset: np.ndarray, batch_size: int, context_length: int, device: str):
     
