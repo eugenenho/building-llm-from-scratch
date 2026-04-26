@@ -196,7 +196,11 @@ if __name__ == "__main__":
         optimizer.step()
 
         # Progress logging
-        wandb.log({"training_loss": loss.item(), "lr": lr, "grad_norm": grad_norm.item()}, step=t)
+        wandb.log({
+            "training_loss": loss.item(), 
+            "lr": lr, 
+            "grad_norm": grad_norm.item(), 
+            "tokens": t * hparams["batch_size"] * hparams["context_length"]}, step=t)
 
         # Check for NaN or inf/-inf => if so, diverged. log and break
         if not math.isfinite(loss.item()): 

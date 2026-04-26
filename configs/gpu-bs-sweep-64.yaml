@@ -35,7 +35,7 @@ checkpoint:
   run_name: null
   save_every: 10000000
   eval_every: 400
-  val_iters: 25
+  val_iters: 64
 
   
 
