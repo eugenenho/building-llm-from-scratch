@@ -10,6 +10,11 @@ if ! command -v uv &> /dev/null; then
     source $HOME/.local/bin/env
 fi
 
+# add to setup_pod.sh, after the uv install block:
+ if ! command -v tmux &> /dev/null; then
+    apt-get update && apt-get install -y tmux
+fi
+
 # Persist UV_PROJECT_ENVIRONMENT for future shells
 grep -qxF 'export UV_PROJECT_ENVIRONMENT=/root/.venv' ~/.bashrc || \
 echo 'export UV_PROJECT_ENVIRONMENT=/root/.venv' >> ~/.bashrc
