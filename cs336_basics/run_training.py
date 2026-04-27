@@ -111,6 +111,11 @@ if __name__ == "__main__":
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
         hparams["run_name"] = f"{timestamp}_lrmax{hparams['lr_max']:.0e}_bs{hparams['batch_size']}_steps{hparams['steps']}"
      
+    # DEBUGGING:
+    print(f"hparam values for debugging")
+    for k, v in hparams.items():
+        print(f"{k} : {v}")
+
     # Step 4: Compute and add hparams not in yaml originally
     tokenizer = Tokenizer.from_files(                   # for sampling, for vocab_size
         vocab_filepath = hparams["vocab_path"], 
@@ -244,7 +249,10 @@ if __name__ == "__main__":
                     val_logits = model(x = val_inputs)
                     val_losses.append(cross_entropy(logits = val_logits, targets = val_targets).item())
                 val_loss = sum(val_losses) / len(val_losses)
-                val_ppl = math.exp(val_loss)
+                try:
+                    val_ppl = math.exp(val_loss)
+                except OverflowError:
+                    val_ppl = float('inf')
             model.train()
             wandb.log({"val_loss": val_loss, "val_ppl": val_ppl}, step=t)
         
