@@ -55,16 +55,22 @@ class rmsnorm(nn.Module):
         
 
 class positionwise_feedforward(nn.Module):
-    def __init__(self, d_model: int, d_ff: int | None = None):
+    def __init__(self, d_model: int, d_ff: int | None = None, config: dict | None = None,):
         super().__init__()
 
         # Initialize
         self.d_model = d_model
+        self.config = config
+        
         if not d_ff:
-            if round(8/3 * d_model / 64) > 0:
-                self.d_ff = round(8/3 * d_model / 64) * 64
-            else:
-                self.d_ff = 64
+            if self.config["ffn_type"] == "swiglu":
+                if round(8/3 * d_model / 64) > 0:
+                    self.d_ff = round(8/3 * d_model / 64) * 64
+                else:
+                    self.d_ff = 64
+            
+            if self.config["ffn_type"] == "silu":
+                self.d_ff = 4 * self.d_model
         else:
             self.d_ff = d_ff
         
@@ -89,9 +95,14 @@ class positionwise_feedforward(nn.Module):
     def forward(self, x: Float[Tensor, "... d_model"]) -> Float[Tensor, "... d_model"]:
         x_w1 = einsum(x, self.w1, "... d_model, d_ff d_model -> ... d_ff")
         silu = einsum(x_w1, torch.sigmoid(x_w1), "... d_ff, ... d_ff -> ... d_ff")
-        x_w3 = einsum(x, self.w3, "... d_model, d_ff d_model -> ... d_ff")
-        swiglu = einsum(silu, x_w3, "... d_ff, ... d_ff -> ... d_ff")
-        return einsum(swiglu, self.w2, "... d_ff, d_model d_ff -> ... d_model")
+
+        if self.config["ffn_type"] == "swiglu":
+            x_w3 = einsum(x, self.w3, "... d_model, d_ff d_model -> ... d_ff")
+            swiglu = einsum(silu, x_w3, "... d_ff, ... d_ff -> ... d_ff")
+            return einsum(swiglu, self.w2, "... d_ff, d_model d_ff -> ... d_model")
+    
+        if self.config["ffn_type"] == "silu":
+            return einsum(silu, self.w2, "... d_ff, d_model d_ff -> ... d_model")
 
 class rope(nn.Module):
     def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None):
@@ -160,7 +171,7 @@ def scaled_dot_product_attention(
     return einsum(softmax_qk, V, "batch_size ... seq_len_q seq_len_k, batch_size ... seq_len_k d_v -> batch_size ... seq_len_q d_v")
 
 class multihead_self_attention(nn.Module):
-    def __init__(self, d_model: int, num_heads: int, max_seq_len: int | None = None, theta: float | None = None,):
+    def __init__(self, d_model: int, num_heads: int, max_seq_len: int | None = None, theta: float | None = None, config: dict | None = None,):
         super().__init__()
         
         # Initialization
@@ -171,6 +182,7 @@ class multihead_self_attention(nn.Module):
         self.d_v = self.d_k
         self.max_seq_len = max_seq_len
         self.theta = theta
+        self.config = config
         
         std = (2 / (num_heads * self.d_k + d_model))**0.5
         self.w_q = nn.Parameter(
@@ -193,7 +205,7 @@ class multihead_self_attention(nn.Module):
                 torch.empty(d_model, num_heads * self.d_v), mean = 0, std = std, a = -3*std, b = 3*std
             )
         )
-        if self.theta is not None:
+        if self.theta is not None and self.config["use_rope"]:                                          # CONFIG: Rope. use_rope needs to be TRUE *and* theta must have been provided
             self.rope = rope(theta = self.theta, d_k = self.d_k, max_seq_len = self.max_seq_len)
         
     def forward(self, x: Float[Tensor, "... seq_len d_model"], token_positions: Int[Tensor, " ... sequence_length"] | None = None,)-> Float[Tensor, "... seq_len d_model"]:
@@ -222,7 +234,7 @@ class multihead_self_attention(nn.Module):
         V = rearrange(V, "... seq_len (num_heads d_v) -> ... seq_len num_heads d_v", num_heads = self.num_heads, d_v = self.d_v)
         V = rearrange(V, "... seq_len num_heads d_v -> ... num_heads seq_len d_v", num_heads = self.num_heads, d_v = self.d_v)
         
-        if self.theta is not None:
+        if self.theta is not None and self.config["use_rope"]:                                          # CONFIG: Rope. use_rope needs to be TRUE *and* theta must have been provided
             if token_positions is None: token_positions = torch.arange(seq_len, device = Q.device)
             Q = self.rope(Q, token_positions)
             K = self.rope(K, token_positions)
@@ -241,23 +253,30 @@ class multihead_self_attention(nn.Module):
 
 
 class transformer_block(nn.Module):
-    def __init__(self, d_model: int, num_heads: int, d_ff: int, max_seq_len: int, theta: float):
+    def __init__(self, d_model: int, num_heads: int, d_ff: int, max_seq_len: int, theta: float, config: dict | None = None,):
         super().__init__()
         self.d_model = d_model
         self.num_heads = num_heads
         self.d_ff = d_ff
+        self.config = config
 
         # Create MHA and FFN objects
-        self.rmsnorm1 = rmsnorm(d_model = d_model)
-        self.mha = multihead_self_attention(d_model = d_model, num_heads = num_heads, max_seq_len = max_seq_len, theta = theta)
-        self.rmsnorm2 = rmsnorm(d_model = d_model)
-        self.ffn = positionwise_feedforward(d_model = d_model, d_ff = d_ff)
+        self.rmsnorm1 = rmsnorm(d_model = d_model) if self.config["use_rms_norm"] else nn.Identity()       # ARCH CONFIG: rms norm
+        self.mha = multihead_self_attention(d_model = d_model, num_heads = num_heads, max_seq_len = max_seq_len, theta = theta, config = config)
+        self.rmsnorm2 = rmsnorm(d_model = d_model) if self.config["use_rms_norm"] else nn.Identity()       # ARCH CONFIG: rms norm
+        self.ffn = positionwise_feedforward(d_model = d_model, d_ff = d_ff, config = config)
     
     def forward(self, x: Float[Tensor, "batch_size ... seq_len d_model"]) -> Float[Tensor, "batch_size ... seq_len d_model"]:
         
-        x = x + self.mha(self.rmsnorm1(x))
-        x = x + self.ffn(self.rmsnorm2(x))
-        return x
+        if self.config["norm_position"] == "pre":
+            x = x + self.mha(self.rmsnorm1(x))
+            x = x + self.ffn(self.rmsnorm2(x))
+            return x
+        
+        if self.config["norm_position"] == "post":
+            x = self.rmsnorm1(x + self.mha(x))
+            x = self.rmsnorm2(x + self.ffn(x))
+            return x
 
 
 class transformer_lm(nn.Module):
@@ -269,22 +288,24 @@ class transformer_lm(nn.Module):
             context_length: int, 
             rope_theta: float, 
             vocab_size: int, 
-            num_layers: int
+            num_layers: int,
+            config: dict | None = None,
     ):
         super().__init__()
 
         self.context_length = context_length
+        self.config = config
 
         # Create vocab embedding
         self.token_embedding = embedding(num_embeddings = vocab_size, embedding_dim = d_model)
         
         # Create transformer blocks
         self.blocks = nn.ModuleList([
-            transformer_block(d_model = d_model, num_heads = num_heads, d_ff = d_ff, max_seq_len = context_length, theta = rope_theta) for _ in range(num_layers)
+            transformer_block(d_model = d_model, num_heads = num_heads, d_ff = d_ff, max_seq_len = context_length, theta = rope_theta, config = config) for _ in range(num_layers)
         ])
             
         # Create final norm
-        self.final_norm = rmsnorm(d_model = d_model)
+        self.final_norm = rmsnorm(d_model = d_model) if self.config["use_rms_norm"] else nn.Identity()       # ARCH CONFIG: rms norm
 
         # Create LM Head
         self.lm_head = linear(in_features = d_model, out_features = vocab_size)

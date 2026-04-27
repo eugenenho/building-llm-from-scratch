@@ -84,6 +84,16 @@ if __name__ == "__main__":
             print(f"CLI override: {k} = {v} (from YAML: {hparams[k]})")
             hparams[k] = v  
     
+    # Default values for backward compatibility
+    if hparams.get("use_rms_norm") is None:
+        hparams["use_rms_norm"] = True               # True: use RMS Norm  | False: no RMS Norm. identity
+    if hparams.get("norm_position") is None:
+        hparams["norm_position"] = "pre"             # "pre" or "post" norm 
+    if hparams.get("use_rope") is None:
+        hparams["use_rope"] = True                   
+    if hparams.get("ffn_type") is None:
+        hparams["ffn_type"] = "swiglu"             # "swiglu" | "silu"
+
     # Step 3: Check if any of the fields are empty
     missing_okay = ["run_name", "d_ff", "vocab_size"]
     for k, v in hparams.items():
@@ -91,8 +101,12 @@ if __name__ == "__main__":
             raise ValueError(f"Critical hyperparameter missing: {k}: {v}")
 
     if hparams["d_ff"] is None:
-        hparams["d_ff"] = round(8/3 * hparams["d_model"] / 64) * 64 
-    
+        if hparams["ffn_type"] == "swiglu":
+            if round(8/3 * hparams["d_model"] / 64) > 0: hparams["d_ff"] = round(8/3 * hparams["d_model"] / 64) * 64 
+            else: hparams["d_ff"] = 64
+        if hparams["ffn_type"] == "silu":
+            hparams["d_ff"] = 4 * hparams["d_model"]      
+
     if hparams["run_name"] is None:
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
         hparams["run_name"] = f"{timestamp}_lrmax{hparams['lr_max']:.0e}_bs{hparams['batch_size']}_steps{hparams['steps']}"
@@ -125,6 +139,7 @@ if __name__ == "__main__":
             rope_theta = hparams["rope_theta"], 
             vocab_size = hparams["vocab_size"], 
             num_layers = hparams["num_layers"],
+            config = hparams,
     )
     model.to(device)
     optimizer = AdamW(
@@ -136,10 +151,6 @@ if __name__ == "__main__":
     )
 
     # PART 3: ALL OTHER SET UP
-    
-    ## DEBUGGING ##
-    # for k, v in hparams.items():
-    #     print(f"{k}: {v}  - dtype: {type(v)}")
 
     # Checkpointing set up
     run_dir = Path(hparams["output_dir"]) / hparams["run_name"]
