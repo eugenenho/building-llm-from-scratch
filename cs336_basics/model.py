@@ -305,7 +305,14 @@ class transformer_lm(nn.Module):
         ])
             
         # Create final norm
-        self.final_norm = rmsnorm(d_model = d_model) if self.config["use_rms_norm"] else nn.Identity()       # ARCH CONFIG: rms norm
+        
+        if self.config["norm_position"] == "post":                                                              # ARCH CONFIG: norm position. no final rms norm if post
+            self.final_norm = nn.Identity()
+        
+        if self.config["norm_position"] == "pre":
+            self.final_norm = rmsnorm(d_model = d_model) if self.config["use_rms_norm"] else nn.Identity()       # ARCH CONFIG: rms norm
+        
+        
 
         # Create LM Head
         self.lm_head = linear(in_features = d_model, out_features = vocab_size)
