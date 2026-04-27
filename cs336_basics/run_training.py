@@ -135,6 +135,10 @@ if __name__ == "__main__":
     else:
         device = "cpu"
     
+    if device == "cuda":
+      torch.set_float32_matmul_precision("high")              # TF32 matmuls for optimization
+
+
     # PART 2: CREATE A MODEL
     model = transformer_lm(
             d_model = hparams["d_model"], 
@@ -147,6 +151,10 @@ if __name__ == "__main__":
             config = hparams,
     )
     model.to(device)
+     
+    if device == "cuda":
+      model = torch.compile(model)                            # Compile, for optimization
+
     optimizer = AdamW(
         params = model.parameters(), 
         lr = 0, 

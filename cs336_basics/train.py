@@ -139,7 +139,11 @@ def save_checkpoint(
         out: str | os.PathLike | typing.BinaryIO | typing.IO[bytes],
 ):
     states = {}
-    states["model"] = model.state_dict()
+    model_state = {
+        k.removeprefix("_orig_mod."): v
+        for k, v in model.state_dict().items()
+    }
+    states["model"] = model_state
     states["optimizer"] = optimizer.state_dict()
     states["iteration"] = iteration
     torch.save(states, out)
