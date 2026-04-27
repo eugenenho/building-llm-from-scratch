@@ -213,8 +213,10 @@ if __name__ == "__main__":
 
         # Forward, backward, step
         optimizer.zero_grad()
-        logits = model(x = inputs)                                  # output: Float[Tensor, "batch_size ... seq_len vocab_size"]
-        loss = cross_entropy(logits = logits, targets = targets)    # torch
+
+        with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=(device == "cuda")):  # bf16 if CUDA
+            logits = model(x = inputs)                                  # output: Float[Tensor, "batch_size ... seq_len vocab_size"]
+        loss = cross_entropy(logits = logits.float(), targets = targets)    # torch
         loss.backward()
         grad_norm = gradient_clipping(model.parameters(), max_l2_norm=hparams["max_l2_norm"])
         optimizer.step()
@@ -254,8 +256,9 @@ if __name__ == "__main__":
                         context_length=hparams["context_length"], 
                         device = device
                     ) 
-                    val_logits = model(x = val_inputs)
-                    val_losses.append(cross_entropy(logits = val_logits, targets = val_targets).item())
+                    with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=(device == "cuda")):  # bf16 if CUDA; otherwise default value (e.g. fp32)
+                        val_logits = model(x = val_inputs)
+                    val_losses.append(cross_entropy(logits = val_logits.float(), targets = val_targets).item())
                 val_loss = sum(val_losses) / len(val_losses)
                 try:
                     val_ppl = math.exp(val_loss)
