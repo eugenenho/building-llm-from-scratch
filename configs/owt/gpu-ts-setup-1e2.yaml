@@ -22,16 +22,16 @@ training:
   max_l2_norm: 1.0
 
 data:
-  train_data_path: data/TinyStoriesV2-GPT4-train-encoded.npy
-  val_data_path: data/TinyStoriesV2-GPT4-valid-encoded.npy
+  train_data_path: data/owt-train-encoded.npy
+  val_data_path: data/owt-valid-encoded.npy
 
 tokenizer:
-  vocab_path: outputs_tinystories/vocab.json
-  merges_path: outputs_tinystories/merges.txt 
+  vocab_path: outputs_owt/vocab.json
+  merges_path: outputs_owt/merges.txt 
   special_tokens: ["<|endoftext|>",]
 
 checkpoint:
-  output_dir: checkpoints/tinystories
+  output_dir: checkpoints/owt
   run_name: null
   save_every: 100000
   eval_every: 500
