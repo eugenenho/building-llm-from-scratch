@@ -10,6 +10,7 @@ import math
 import numpy as np
 import numpy.typing as npt
 import os
+import time
 
 def cross_entropy(logits: Float[Tensor, "... vocab_size"], targets: Int[Tensor, "..."]):
     
@@ -107,12 +108,36 @@ def learning_rate_scheduler(
 
 def gradient_clipping(params, max_l2_norm):
     eps = 10**(-6)
+    
+    # DEBUGGING: TEMP
+    if torch.cuda.is_available(): torch.cuda.synchronize()
+    t0 = time.perf_counter()
+
     total_l2_norm = torch.sqrt(sum(torch.sum(p.grad ** 2) for p in params if p.grad is not None))
+    torch.cuda.synchronize()
+    
+    # DEBUGGING: TEMP
+    if torch.cuda.is_available(): torch.cuda.synchronize()
+    t1 = time.perf_counter()
+
     if total_l2_norm >= max_l2_norm:
         scaling_factor = max_l2_norm / (total_l2_norm + eps)
         for p in params: 
             if p.grad is not None:
                 p.grad = p.grad * scaling_factor
+    
+    # DEBUGGING: TEMP
+    if torch.cuda.is_available(): torch.cuda.synchronize()
+    t2 = time.perf_counter()
+
+    # Print only first ~10 calls to avoid spam
+    if not hasattr(gradient_clipping, "_call_count"):
+        gradient_clipping._call_count = 0
+    gradient_clipping._call_count += 1
+    if gradient_clipping._call_count <= 10:
+        print(f"  clip norm calc: {(t1-t0)*1000:.1f}ms | rescale: {(t2-t1)*1000:.1f}ms | norm value: {total_l2_norm.item():.2f}")
+    # END TEMP TIMING
+    
     return total_l2_norm
     
 def data_loader(dataset: np.ndarray, batch_size: int, context_length: int, device: str):
