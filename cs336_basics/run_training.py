@@ -1,4 +1,4 @@
-import torch
+import torch, subprocess
 from cs336_basics.model import transformer_lm
 from cs336_basics.train import AdamW
 from cs336_basics.train import data_loader, learning_rate_scheduler, gradient_clipping, save_checkpoint, load_checkpoint, cross_entropy
@@ -55,6 +55,10 @@ if __name__ == "__main__":
     
     """
         
+    print(f"Driver: {subprocess.getoutput('nvidia-smi --query-gpu=driver_version --format=csv,noheader')}")
+    print(f"GPU: {torch.cuda.get_device_name(0)}, capability {torch.cuda.get_device_capability(0)}")
+    print(f"PyTorch: {torch.__version__}, CUDA built: {torch.version.cuda}")
+
     # Step 1: Read from YAML first
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, required=True, help="config file path")
