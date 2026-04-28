@@ -176,3 +176,6 @@ wandb/
 
 # macOS metadata
 .DS_Store
+
+# Archives
+archive/

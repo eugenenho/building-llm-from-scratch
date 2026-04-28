@@ -257,7 +257,7 @@ if __name__ == "__main__":
                         device = device
                     ) 
                     with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=(device == "cuda")):  # bf16 if CUDA; otherwise default value (e.g. fp32)
-                        val_logits = model(x = val_inputs)
+                        val_logits = model._orig_mod(x = val_inputs) if hasattr(model, "_orig_mod") else model(x = val_inputs) # run original uncompiled model, if model is compiled
                     val_losses.append(cross_entropy(logits = val_logits.float(), targets = val_targets).item())
                 val_loss = sum(val_losses) / len(val_losses)
                 try:
