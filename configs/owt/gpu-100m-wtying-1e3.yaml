@@ -42,8 +42,8 @@ ablation:
   norm_position: pre
   use_rope: True
   ffn_type: swiglu
-  qk_norm: True
-  wang_init: True
-  z_loss: True
-  z_loss_alpha: 1.0e-4
+  qk_norm: False
+  wang_init: False
+  z_loss: False
+  z_loss_alpha: null
   weight_tying: True
