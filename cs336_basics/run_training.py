@@ -70,7 +70,7 @@ if __name__ == "__main__":
     hparams = {k:v for _, group in nested_hparams.items() for k, v in group.items()}
     
     # Step 2: Check for overrides from CLI
-    list_args = ["run_name", "lr_max", "lr_min", "steps", "batch_size", "context_length"]
+    list_args = ["run_name", "lr_max", "lr_min", "steps", "batch_size", "context_length", "qk_norm", "wang_init", "z_loss"]
     parser.add_argument("--run-name", default=argparse.SUPPRESS, type=str, help="name of the run")
     parser.add_argument("--lr-max", default=argparse.SUPPRESS, type=float, help="max learning rate for the lr scheduler")
     parser.add_argument("--lr-min", default=argparse.SUPPRESS, type=float, help="min learning rate for the lr scheduler")
