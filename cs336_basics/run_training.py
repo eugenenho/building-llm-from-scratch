@@ -98,6 +98,8 @@ if __name__ == "__main__":
         hparams["use_rope"] = True                   
     if hparams.get("ffn_type") is None:
         hparams["ffn_type"] = "swiglu"             # "swiglu" | "silu"
+    if hparams.get("qk_norm") is None:
+        hparams["qk_norm"] = False
 
     # Step 3: Check if any of the fields are empty
     missing_okay = ["run_name", "d_ff", "vocab_size"]

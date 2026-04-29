@@ -36,11 +36,7 @@ class rmsnorm(nn.Module):
         std = (2 / d_model)**0.5
         self.d_model = d_model
         self.eps = eps
-        self.g = nn.Parameter(
-            torch.nn.init.trunc_normal_(
-                torch.empty(d_model), mean = 0, std = std, a = -3*std, b = 3*std
-            )
-        )
+        self.g = nn.Parameter(torch.ones(d_model))
 
     def forward(self, x: Float[Tensor, "... d_model"]) -> Float[Tensor, "... d_model"]:
         # Upcast to float32
@@ -208,6 +204,9 @@ class multihead_self_attention(nn.Module):
         if self.theta is not None and self.config["use_rope"]:                                          # CONFIG: Rope. use_rope needs to be TRUE *and* theta must have been provided
             self.rope = rope(theta = self.theta, d_k = self.d_k, max_seq_len = self.max_seq_len)
         
+        if self.config["qk_norm"]:      # IF QK NORM is TRUE
+            self.rmsnorm_q = rmsnorm(d_model = self.d_k)
+            self.rmsnorm_k = rmsnorm(d_model = self.d_k)
     def forward(self, x: Float[Tensor, "... seq_len d_model"], token_positions: Int[Tensor, " ... sequence_length"] | None = None,)-> Float[Tensor, "... seq_len d_model"]:
         
         # Combine into one large matrix so Q, K, V can be calculated with one mat mul
@@ -234,6 +233,10 @@ class multihead_self_attention(nn.Module):
         V = rearrange(V, "... seq_len (num_heads d_v) -> ... seq_len num_heads d_v", num_heads = self.num_heads, d_v = self.d_v)
         V = rearrange(V, "... seq_len num_heads d_v -> ... num_heads seq_len d_v", num_heads = self.num_heads, d_v = self.d_v)
         
+        if self.config["qk_norm"]:      # IF QK NORM is TRUE
+            Q = self.rmsnorm_q(Q)
+            K = self.rmsnorm_k(K)
+
         if self.theta is not None and self.config["use_rope"]:                                          # CONFIG: Rope. use_rope needs to be TRUE *and* theta must have been provided
             if token_positions is None: token_positions = torch.arange(seq_len, device = Q.device)
             Q = self.rope(Q, token_positions)
