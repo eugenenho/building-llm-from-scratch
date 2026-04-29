@@ -77,6 +77,9 @@ if __name__ == "__main__":
     parser.add_argument("--steps", default=argparse.SUPPRESS, type=int, help="total steps for training")
     parser.add_argument("--batch-size", default=argparse.SUPPRESS, type=int, help="batch size for training")
     parser.add_argument("--context-length", default=argparse.SUPPRESS, type=int, help="max sequence length for the model")
+    parser.add_argument("--qk-norm", default=argparse.SUPPRESS, type=bool, help="whether QKNorm is on or off (True/False). Bool")
+    parser.add_argument("--wang-init", default=argparse.SUPPRESS, type=bool, help="whether Wang Init is on or off (True/False). Bool")
+    parser.add_argument("--z-loss", default=argparse.SUPPRESS, type=bool, help="whether z loss is on or off (True/False). Bool")
     args = parser.parse_args()
     cli_overrides = vars(args) # dict of only what the user passed on CLI, overriding YAML
 
@@ -100,7 +103,13 @@ if __name__ == "__main__":
         hparams["ffn_type"] = "swiglu"             # "swiglu" | "silu"
     if hparams.get("qk_norm") is None:
         hparams["qk_norm"] = False
-
+    if hparams.get("wang_init") is None:
+        hparams["wang_init"] = False
+    if hparams.get("z_loss") is None:
+        hparams["z_loss"] = False
+    if hparams.get("z_loss_alpha") is None:
+        hparams["z_loss_alpha"] = 1.0e-4
+        
     # Step 3: Check if any of the fields are empty
     missing_okay = ["run_name", "d_ff", "vocab_size"]
     for k, v in hparams.items():
@@ -223,7 +232,14 @@ if __name__ == "__main__":
 
         with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=(device == "cuda")):  # bf16 if CUDA
             logits = model(x = inputs)                                  # output: Float[Tensor, "batch_size ... seq_len vocab_size"]
-        loss = cross_entropy(logits = logits.float(), targets = targets)    # torch
+        ce_loss, log_z = cross_entropy(logits = logits.float(), targets = targets)    # torch
+        z_loss_term = (log_z**2).mean()
+        
+        if hparams["z_loss"]:
+            loss = ce_loss + hparams["z_loss_alpha"] * z_loss_term
+        else:
+            loss = ce_loss
+        
         loss.backward()
         grad_norm = gradient_clipping(model.parameters(), max_l2_norm=hparams["max_l2_norm"])
         optimizer.step()
@@ -231,9 +247,13 @@ if __name__ == "__main__":
         # Progress logging
         wandb.log({
             "training_loss": loss.item(), 
+            "ce_loss": ce_loss.item(),
+            "z_loss_term": z_loss_term.item(),
+            "log_z_abs_mean": log_z.abs().mean().item(),    # raw drift indicator
             "lr": lr, 
             "grad_norm": grad_norm.item(), 
-            "tokens": t * hparams["batch_size"] * hparams["context_length"]}, step=t)
+            "tokens": t * hparams["batch_size"] * hparams["context_length"]}, step=t
+        )
 
         # Check for NaN or inf/-inf => if so, diverged. log and break
         if not math.isfinite(loss.item()): 
@@ -254,7 +274,8 @@ if __name__ == "__main__":
             model.eval()                    # turns off dropout, etc
             with torch.no_grad():           # no autograd stuff, saves memory and time
 
-                val_losses = []                
+                val_iter_losses = []         
+                val_iter_ce_losses = []       
                 for _ in range(hparams["val_iters"]):
                     # Get data
                     val_inputs, val_targets = data_loader(                               # tensors: (batch_size, context_length)
@@ -265,16 +286,25 @@ if __name__ == "__main__":
                     ) 
                     with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=(device == "cuda")):  # bf16 if CUDA; otherwise default value (e.g. fp32)
                         val_logits = model._orig_mod(x = val_inputs) if hasattr(model, "_orig_mod") else model(x = val_inputs) # run original uncompiled model, if model is compiled
-                    val_losses.append(cross_entropy(logits = val_logits.float(), targets = val_targets).item())
-                val_loss = sum(val_losses) / len(val_losses)
+                    val_ce_loss, val_log_z = cross_entropy(logits = val_logits.float(), targets = val_targets)
+                    
+                    if hparams["z_loss"]:
+                        iter_loss = val_ce_loss + hparams["z_loss_alpha"] * (val_log_z**2).mean() 
+                    else:
+                        iter_loss = val_ce_loss
+                    
+                    val_iter_losses.append(iter_loss.item())
+                    val_iter_ce_losses.append(val_ce_loss.item())
+                val_loss = sum(val_iter_losses) / len(val_iter_losses)
+                val_ce_loss = sum(val_iter_ce_losses) / len(val_iter_ce_losses)
                 try:
-                    val_ppl = math.exp(val_loss)
+                    val_ppl = math.exp(val_ce_loss)
                 except OverflowError:
                     val_ppl = float('inf')
             model.train()
-            wandb.log({"val_loss": val_loss, "val_ppl": val_ppl}, step=t)
+            wandb.log({"val_loss": val_loss, "val_ce_loss": val_ce_loss, "val_ppl": val_ppl}, step=t)
         
-            print(f"Step: {t}   Training loss: {loss.item()}    Validation loss: {val_loss}    Vallidation perplexity: {val_ppl}     lr: {lr}")
+            print(f"Step: {t}   Training loss: {loss.item()}    Training CE loss: {ce_loss.item()}      Validation loss: {val_loss}    Validation CE loss: {val_ce_loss}     Vallidation perplexity: {val_ppl}     lr: {lr}")
             
 
     final_path = run_dir / f"step_{t}_final.pt"

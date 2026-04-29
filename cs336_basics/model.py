@@ -51,7 +51,7 @@ class rmsnorm(nn.Module):
         
 
 class positionwise_feedforward(nn.Module):
-    def __init__(self, d_model: int, d_ff: int | None = None, config: dict | None = None,):
+    def __init__(self, d_model: int, d_ff: int | None = None, num_layers: int | None = None, config: dict | None = None,):
         super().__init__()
 
         # Initialize
@@ -72,6 +72,12 @@ class positionwise_feedforward(nn.Module):
         
         
         std = (2 / (self.d_ff + self.d_model))**0.5
+
+        if self.config["wang_init"]:
+            std_w_2 = std / (2 * num_layers)**0.5 
+        else:
+            std_w_2 = std
+
         self.w1 = nn.Parameter(         # (d_ff, d_model)
             torch.nn.init.trunc_normal_(
                 torch.empty(self.d_ff, self.d_model), mean = 0, std = std, a = -3*std, b = 3*std
@@ -82,9 +88,10 @@ class positionwise_feedforward(nn.Module):
                 torch.empty(self.d_ff, self.d_model), mean = 0, std = std, a = -3*std, b = 3*std
             )
         )
+        
         self.w2 = nn.Parameter(          # (d_model, d_ff)
             torch.nn.init.trunc_normal_(
-                torch.empty(self.d_model, self.d_ff), mean = 0, std = std, a = -3*std, b = 3*std
+                torch.empty(self.d_model, self.d_ff), mean = 0, std = std_w_2, a = -3*std_w_2, b = 3*std_w_2
             )
         )
 
@@ -167,7 +174,7 @@ def scaled_dot_product_attention(
     return einsum(softmax_qk, V, "batch_size ... seq_len_q seq_len_k, batch_size ... seq_len_k d_v -> batch_size ... seq_len_q d_v")
 
 class multihead_self_attention(nn.Module):
-    def __init__(self, d_model: int, num_heads: int, max_seq_len: int | None = None, theta: float | None = None, config: dict | None = None,):
+    def __init__(self, d_model: int, num_heads: int, max_seq_len: int | None = None, theta: float | None = None,  num_layers: int | None = None, config: dict | None = None,):
         super().__init__()
         
         # Initialization
@@ -181,6 +188,12 @@ class multihead_self_attention(nn.Module):
         self.config = config
         
         std = (2 / (num_heads * self.d_k + d_model))**0.5
+        
+        if self.config["wang_init"]:
+            std_w_o = std / (2 * num_layers)**0.5 
+        else:
+            std_w_o = std
+        
         self.w_q = nn.Parameter(
             torch.nn.init.trunc_normal_(
                 torch.empty(num_heads * self.d_k, d_model), mean = 0, std = std, a = -3*std, b = 3*std
@@ -198,7 +211,7 @@ class multihead_self_attention(nn.Module):
         )
         self.w_o = nn.Parameter(
             torch.nn.init.trunc_normal_(
-                torch.empty(d_model, num_heads * self.d_v), mean = 0, std = std, a = -3*std, b = 3*std
+                torch.empty(d_model, num_heads * self.d_v), mean = 0, std = std_w_o, a = -3*std_w_o, b = 3*std_w_o
             )
         )
         if self.theta is not None and self.config["use_rope"]:                                          # CONFIG: Rope. use_rope needs to be TRUE *and* theta must have been provided
@@ -207,6 +220,7 @@ class multihead_self_attention(nn.Module):
         if self.config["qk_norm"]:      # IF QK NORM is TRUE
             self.rmsnorm_q = rmsnorm(d_model = self.d_k)
             self.rmsnorm_k = rmsnorm(d_model = self.d_k)
+
     def forward(self, x: Float[Tensor, "... seq_len d_model"], token_positions: Int[Tensor, " ... sequence_length"] | None = None,)-> Float[Tensor, "... seq_len d_model"]:
         
         # Combine into one large matrix so Q, K, V can be calculated with one mat mul
@@ -256,7 +270,7 @@ class multihead_self_attention(nn.Module):
 
 
 class transformer_block(nn.Module):
-    def __init__(self, d_model: int, num_heads: int, d_ff: int, max_seq_len: int, theta: float, config: dict | None = None,):
+    def __init__(self, d_model: int, num_heads: int, d_ff: int, max_seq_len: int, theta: float, num_layers: int | None = None, config: dict | None = None,):
         super().__init__()
         self.d_model = d_model
         self.num_heads = num_heads
@@ -265,9 +279,9 @@ class transformer_block(nn.Module):
 
         # Create MHA and FFN objects
         self.rmsnorm1 = rmsnorm(d_model = d_model) if self.config["use_rms_norm"] else nn.Identity()       # ARCH CONFIG: rms norm
-        self.mha = multihead_self_attention(d_model = d_model, num_heads = num_heads, max_seq_len = max_seq_len, theta = theta, config = config)
+        self.mha = multihead_self_attention(d_model = d_model, num_heads = num_heads, max_seq_len = max_seq_len, theta = theta, num_layers = num_layers, config = config)
         self.rmsnorm2 = rmsnorm(d_model = d_model) if self.config["use_rms_norm"] else nn.Identity()       # ARCH CONFIG: rms norm
-        self.ffn = positionwise_feedforward(d_model = d_model, d_ff = d_ff, config = config)
+        self.ffn = positionwise_feedforward(d_model = d_model, d_ff = d_ff, num_layers = num_layers, config = config)
     
     def forward(self, x: Float[Tensor, "batch_size ... seq_len d_model"]) -> Float[Tensor, "batch_size ... seq_len d_model"]:
         
@@ -304,7 +318,7 @@ class transformer_lm(nn.Module):
         
         # Create transformer blocks
         self.blocks = nn.ModuleList([
-            transformer_block(d_model = d_model, num_heads = num_heads, d_ff = d_ff, max_seq_len = context_length, theta = rope_theta, config = config) for _ in range(num_layers)
+            transformer_block(d_model = d_model, num_heads = num_heads, d_ff = d_ff, max_seq_len = context_length, theta = rope_theta, num_layers = num_layers, config = config) for _ in range(num_layers)
         ])
             
         # Create final norm
