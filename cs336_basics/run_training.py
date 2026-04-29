@@ -70,16 +70,14 @@ if __name__ == "__main__":
     hparams = {k:v for _, group in nested_hparams.items() for k, v in group.items()}
     
     # Step 2: Check for overrides from CLI
-    list_args = ["run_name", "lr_max", "lr_min", "steps", "batch_size", "context_length", "qk_norm", "wang_init", "z_loss"]
+    list_args = ["run_name", "lr_max", "lr_min", "steps", "batch_size", "context_length",]
     parser.add_argument("--run-name", default=argparse.SUPPRESS, type=str, help="name of the run")
     parser.add_argument("--lr-max", default=argparse.SUPPRESS, type=float, help="max learning rate for the lr scheduler")
     parser.add_argument("--lr-min", default=argparse.SUPPRESS, type=float, help="min learning rate for the lr scheduler")
     parser.add_argument("--steps", default=argparse.SUPPRESS, type=int, help="total steps for training")
     parser.add_argument("--batch-size", default=argparse.SUPPRESS, type=int, help="batch size for training")
     parser.add_argument("--context-length", default=argparse.SUPPRESS, type=int, help="max sequence length for the model")
-    parser.add_argument("--qk-norm", default=argparse.SUPPRESS, type=bool, help="whether QKNorm is on or off (True/False). Bool")
-    parser.add_argument("--wang-init", default=argparse.SUPPRESS, type=bool, help="whether Wang Init is on or off (True/False). Bool")
-    parser.add_argument("--z-loss", default=argparse.SUPPRESS, type=bool, help="whether z loss is on or off (True/False). Bool")
+    
     args = parser.parse_args()
     cli_overrides = vars(args) # dict of only what the user passed on CLI, overriding YAML
 
@@ -109,6 +107,8 @@ if __name__ == "__main__":
         hparams["z_loss"] = False
     if hparams.get("z_loss_alpha") is None:
         hparams["z_loss_alpha"] = 1.0e-4
+    if hparams.get("weight_tying") is None:
+        hparams["weight_tying"] = False
         
     # Step 3: Check if any of the fields are empty
     missing_okay = ["run_name", "d_ff", "vocab_size"]
@@ -167,6 +167,8 @@ if __name__ == "__main__":
             config = hparams,
     )
     model.to(device)
+    print(f"model: number of parameters: {sum(p.numel() for p in model.parameters())}")
+    
      
     if device == "cuda":
       model = torch.compile(model)                            # Compile, for optimization

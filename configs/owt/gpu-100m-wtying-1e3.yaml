@@ -1,0 +1,49 @@
+model:
+  context_length: 256
+  d_model: 640
+  vocab_size: null
+  num_layers: 12
+  num_heads: 10 
+  rope_theta: 10000
+  d_ff: 1728
+
+training:
+  batch_size: 256
+  steps: 30000
+  warmup_iters: 500
+  cosine_cycle_iters: 30000
+  lr_max: 1.0e-3
+  lr_min: 1.0e-4
+  weight_decay: 0.1
+  betas:
+    - 0.9
+    - 0.95
+  adamw_eps: 1.0e-8
+  max_l2_norm: 1.0
+
+data:
+  train_data_path: data/owt-train-encoded.npy
+  val_data_path: data/owt-valid-encoded.npy
+
+tokenizer:
+  vocab_path: outputs_owt/vocab.json
+  merges_path: outputs_owt/merges.txt 
+  special_tokens: ["<|endoftext|>",]
+
+checkpoint:
+  output_dir: checkpoints/owt
+  run_name: null
+  save_every: 100000
+  eval_every: 1000
+  val_iters: 50
+
+ablation:
+  use_rms_norm: True
+  norm_position: pre
+  use_rope: True
+  ffn_type: swiglu
+  qk_norm: True
+  wang_init: True
+  z_loss: True
+  z_loss_alpha: 1.0e-4
+  weight_tying: True

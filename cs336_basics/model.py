@@ -17,11 +17,15 @@ class linear(nn.Module):
     
 
 class embedding(nn.Module):
-    def __init__(self, num_embeddings: int, embedding_dim: int, device: torch.device | None = None, dtype: torch.dtype |None = None):
+    def __init__(self, num_embeddings: int, embedding_dim: int, device: torch.device | None = None, dtype: torch.dtype | None = None, config: dict | None = None):
         super().__init__()
 
         # Initialize
-        std = 1
+        self.config = config
+        if self.config["weight_tying"]:
+            std = 1 / embedding_dim**0.5
+        else:
+            std = 1
         self.embed = nn.Parameter(torch.nn.init.trunc_normal_(torch.empty((num_embeddings, embedding_dim), device=device, dtype=dtype), mean = 0, std = std, a = -3, b = 3))
 
     def forward(self, token_ids: Int[Tensor, "batch_size seq_length"]) -> Float[Tensor, "batch_size seq_length embedding_dim"]:
@@ -314,7 +318,7 @@ class transformer_lm(nn.Module):
         self.config = config
 
         # Create vocab embedding
-        self.token_embedding = embedding(num_embeddings = vocab_size, embedding_dim = d_model)
+        self.token_embedding = embedding(num_embeddings = vocab_size, embedding_dim = d_model, config = config)
         
         # Create transformer blocks
         self.blocks = nn.ModuleList([
@@ -332,7 +336,14 @@ class transformer_lm(nn.Module):
         
         
         # Create LM Head
-        self.lm_head = linear(in_features = d_model, out_features = vocab_size)
+        
+        if self.config["weight_tying"]:
+            self.lm_head = linear(in_features = d_model, out_features = vocab_size)
+            self.lm_head.w = self.token_embedding.embed
+        else:
+            self.lm_head = linear(in_features = d_model, out_features = vocab_size)    
+        
+            
 
     def forward(self, x: Int[Tensor, "batch_size ... seq_len"]) -> Float[Tensor, "batch_size ... seq_len vocab_size"]:
         
