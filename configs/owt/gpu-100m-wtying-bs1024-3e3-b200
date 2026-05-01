@@ -12,8 +12,8 @@ training:
   steps: 33000
   warmup_iters: 500
   cosine_cycle_iters: 33000
-  lr_max: 2.0e-3
-  lr_min: 2.0e-4
+  lr_max: 3.0e-3
+  lr_min: 3.0e-4
   weight_decay: 0.1
   betas:
     - 0.9
