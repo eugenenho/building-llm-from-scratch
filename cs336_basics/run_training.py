@@ -12,6 +12,8 @@ import wandb
 import math
 import time
 
+TIME_LIMIT = 45 # minutes
+
 if __name__ == "__main__":
     
     # PART 1: GET HYPERPARAMETERS
@@ -207,6 +209,11 @@ if __name__ == "__main__":
     val_dataset = np.load(hparams["val_data_path"], mmap_mode='r')
 
 
+    training_start = None
+    ckpt_45min_saved = False
+    target_seconds = TIME_LIMIT * 60
+    force_val_for_time_limit = False
+
     # PART 4: TRAINING LOOP
     for t in range(hparams["steps"]):
         
@@ -246,39 +253,37 @@ if __name__ == "__main__":
         grad_norm = gradient_clipping(model.parameters(), max_l2_norm=hparams["max_l2_norm"])
         optimizer.step()
 
-        # Progress logging
-        wandb.log({
-            "training_loss": loss.item(), 
-            "ce_loss": ce_loss.item(),
-            "z_loss_term": z_loss_term.item(),
-            "log_z_abs_mean": log_z.abs().mean().item(),    # raw drift indicator
-            "lr": lr, 
-            "grad_norm": grad_norm.item(), 
-            "tokens": t * hparams["batch_size"] * hparams["context_length"]}, step=t
-        )
 
-        # Check for NaN or inf/-inf => if so, diverged. log and break
-        if not math.isfinite(loss.item()): 
-            print(f"DIVERGED at step {t}, loss={loss.item()}")
-            wandb.run.summary["diverged"] = True
-            wandb.run.summary["divergence_step"] = t
-            wandb.run.summary["lr_at_divergence"] = lr
-            break
+        # Check wall clock 
+        if t == 0:
+            training_start = time.time()
 
-        # Checkpointing
-        if (t + 1) % hparams["save_every"] == 0:
-            ckpt_path = run_dir / f"step_{t}.pt"
-            save_checkpoint(model = model, optimizer = optimizer, iteration = t, out = ckpt_path)
+        if training_start is not None:
+            wall_clock_seconds = time.time() - training_start
 
-        # Validation
-        if (t + 1) % hparams["eval_every"] == 0:
+        # Save 45-min checkpoint once
+        if not ckpt_45min_saved and wall_clock_seconds >= target_seconds:
+            ckpt_path = run_dir / f"step_{t}_45min.pt"
+            save_checkpoint(model=model, optimizer=optimizer, iteration=t, out=ckpt_path)
+            print(f"45 MIN CHECKPOINT SAVED at step {t}")
+            wandb.run.summary["step_at_45min"] = t
+            wandb.run.summary["wall_clock_45min"] = wall_clock_seconds
+            ckpt_45min_saved = True
+            force_val_for_time_limit = True
+        
+       
+        # Validation: eval_every, or if TIME_LIMIT reached
+        if (t + 1) % hparams["eval_every"] == 0 or force_val_for_time_limit:
+            
             
             model.eval()                    # turns off dropout, etc
             with torch.no_grad():           # no autograd stuff, saves memory and time
 
                 val_iter_losses = []         
                 val_iter_ce_losses = []       
-                for _ in range(hparams["val_iters"]):
+                
+                val_iters = hparams["val_iters"] * 4 if force_val_for_time_limit else hparams["val_iters"]
+                for _ in range(val_iters):
                     # Get data
                     val_inputs, val_targets = data_loader(                               # tensors: (batch_size, context_length)
                         dataset = val_dataset, 
@@ -305,9 +310,39 @@ if __name__ == "__main__":
                     val_ppl = float('inf')
             model.train()
             wandb.log({"val_loss": val_loss, "val_ce_loss": val_ce_loss, "val_ppl": val_ppl}, step=t)
-        
+            
+            # if TIME_LIMIT
+            if force_val_for_time_limit: wandb.run.summary["val_ce_loss_at_45min"] = val_ce_loss
+            force_val_for_time_limit = False  # reset
+
             print(f"Step: {t}   Training loss: {loss.item()}    Training CE loss: {ce_loss.item()}      Validation loss: {val_loss}    Validation CE loss: {val_ce_loss}     Vallidation perplexity: {val_ppl}     lr: {lr}")
             
+        # Progress logging
+        wandb.log({
+            "training_loss": loss.item(), 
+            "ce_loss": ce_loss.item(),
+            "z_loss_term": z_loss_term.item(),
+            "log_z_abs_mean": log_z.abs().mean().item(),    # raw drift indicator
+            "lr": lr, 
+            "grad_norm": grad_norm.item(), 
+            "tokens": t * hparams["batch_size"] * hparams["context_length"],
+            "wall_clock_seconds": wall_clock_seconds,}, step=t
+        )
+
+        # Check for NaN or inf/-inf => if so, diverged. log and break
+        if not math.isfinite(loss.item()): 
+            print(f"DIVERGED at step {t}, loss={loss.item()}")
+            wandb.run.summary["diverged"] = True
+            wandb.run.summary["divergence_step"] = t
+            wandb.run.summary["lr_at_divergence"] = lr
+            break
+
+        # Checkpointing
+        if (t + 1) % hparams["save_every"] == 0:
+            ckpt_path = run_dir / f"step_{t}.pt"
+            save_checkpoint(model = model, optimizer = optimizer, iteration = t, out = ckpt_path)
+
+
 
     final_path = run_dir / f"step_{t}_final.pt"
     save_checkpoint(model = model, optimizer = optimizer, iteration = t, out = final_path)
