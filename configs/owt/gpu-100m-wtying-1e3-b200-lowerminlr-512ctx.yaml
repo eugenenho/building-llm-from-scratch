@@ -34,7 +34,7 @@ checkpoint:
   output_dir: checkpoints/owt
   run_name: null
   save_every: 100000
-  eval_every: 1000
+  eval_every: 400
   val_iters: 50
 
 ablation:
