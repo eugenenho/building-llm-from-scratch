@@ -4,9 +4,14 @@ A decoder-only transformer language model built from scratch in PyTorch — the
 tokenizer, model, optimizer, and training loop are all hand-implemented, with no
 high-level language-modeling libraries. Trained on a subsample of OpenWebText.
 
+> Built as my implementation of **Assignment 1** from Stanford's
+> [CS336: Language Modeling from Scratch](https://stanford-cs336.github.io/)
+> ([assignment repo](https://github.com/stanford-cs336/assignment1-basics)).
+
 ## What's implemented
 
-Everything is written from the ground up (matmuls via `einops`, no `nn.Transformer`):
+Everything is written from the ground up — by hand, without a coding assistant
+(matmuls via `einops`, no `nn.Transformer`):
 
 - **Tokenizer** — byte-level BPE trainer plus encoder/decoder
   (`cs336_basics/train_bpe.py`, `cs336_basics/tokenizer.py`)
