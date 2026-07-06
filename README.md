@@ -48,3 +48,22 @@ gunzip owt_valid.txt.gz
 cd ..
 ```
 
+### 2. Encode the text into token IDs
+
+  `cs336_basics/main.py` trains on pre-tokenized `uint16` arrays (`.npy`), not raw
+  text. The trained BPE tokenizer (32K vocab) is committed under `outputs_owt/`
+  (`vocab.json` + `merges.txt`), so you don't retrain it — just encode the text you
+  downloaded above:
+
+  ```bash
+  uv run python -m cs336_basics.encode_data
+  ```
+
+  This reads `data/owt_train.txt` / `data/owt_valid.txt` and writes
+  `data/owt-train-encoded.npy` / `data/owt-valid-encoded.npy` — the files the
+  training config's `train_data_path` / `val_data_path` point to. If any input is
+  missing, the script exits and tells you to run the download step first.
+
+  **Note:** encoding the OWT train set (~5 GB) holds the full token stream in memory
+  before writing, so it needs a machine with substantial free RAM and takes several
+  minutes.
