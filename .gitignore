@@ -177,8 +177,8 @@ wandb/
 # macOS metadata
 .DS_Store
 
-# Archives
-archive/
+# Personal files (kept locally, not published)
+personal/
 .gstack/
 
 # Claude Code local state
@@ -191,12 +191,3 @@ outputs/
 outputs_tinystories_old/
 outputs*/output.txt
 outputs*/counts.json
-
-# Scratch / experiment scripts (kept locally, not part of the published package)
-cs336_basics/scratchpad.py
-cs336_basics/einops_tutorial.py
-cs336_basics/train_experiments.py
-cs336_basics/tokenizer_test_script.py
-cs336_basics/resource_accounting_workbook.py
-cs336_basics/pretokenization_example.py
-cs336_basics/train_bpe_old.py
