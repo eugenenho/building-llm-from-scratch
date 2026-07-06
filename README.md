@@ -180,12 +180,6 @@ outputs_owt/           committed 32K BPE tokenizer for OpenWebText
 outputs_tinystories/   committed BPE tokenizer for TinyStories
 ```
 
-## Running the tests
-
-```sh
-uv run pytest
-```
-
 ## Acknowledgments
 
 This project began from the assignment scaffold for Stanford's
