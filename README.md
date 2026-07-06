@@ -130,6 +130,13 @@ the command line: `--lr-max`, `--lr-min`, `--steps`, `--batch-size`,
 Training logs to Weights & Biases — run `uv run wandb login` first, or set
 `WANDB_API_KEY`.
 
+To run without a Weights & Biases account, prefix the command with
+`WANDB_MODE=disabled` (all W&B calls become no-ops):
+
+```sh
+WANDB_MODE=disabled uv run python cs336_basics/main.py --config [config path] --run-name [run name]
+```
+
 ## Training your own tokenizer (optional)
 
 The 32K OpenWebText tokenizer is already committed in `outputs_owt/`, so most users

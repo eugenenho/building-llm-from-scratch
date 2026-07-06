@@ -58,9 +58,11 @@ if __name__ == "__main__":
     
     """
         
-    print(f"Driver: {subprocess.getoutput('nvidia-smi --query-gpu=driver_version --format=csv,noheader')}")
-    print(f"GPU: {torch.cuda.get_device_name(0)}, capability {torch.cuda.get_device_capability(0)}")
-    print(f"PyTorch: {torch.__version__}, CUDA built: {torch.version.cuda}")
+    # Diagnostic:
+    if torch.cuda.is_available():
+        print(f"Driver: {subprocess.getoutput('nvidia-smi --query-gpu=driver_version --format=csv,noheader')}")
+        print(f"GPU: {torch.cuda.get_device_name(0)}, capability {torch.cuda.get_device_capability(0)}")
+        print(f"PyTorch: {torch.__version__}, CUDA built: {torch.version.cuda}")
 
     # Step 1: Read from YAML first
     parser = argparse.ArgumentParser()
