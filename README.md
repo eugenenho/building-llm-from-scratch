@@ -186,7 +186,6 @@ trained on a single B200 within a 45-minute budget at context length 512:
 ```
 cs336_basics/          model, tokenizer, optimizer, training loop, data encoding
 configs/               training configs (owt/ and tinystories/)
-scripts/               environment setup (e.g. cloud GPU pod setup)
 tests/                 unit tests
 outputs_owt/           committed 32K BPE tokenizer for OpenWebText
 outputs_tinystories/   committed BPE tokenizer for TinyStories
